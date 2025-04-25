@@ -1,0 +1,18 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Benutzerdefinierte Stile */
+@layer components {
+    .btn {
+        @apply px-4 py-2 rounded transition-colors;
+    }
+
+    .btn-primary {
+        @apply bg-blue-500 text-white hover:bg-blue-600;
+    }
+
+    .btn-outline {
+        @apply border border-blue-500 text-blue-500 hover:bg-blue-50;
+    }
+}
