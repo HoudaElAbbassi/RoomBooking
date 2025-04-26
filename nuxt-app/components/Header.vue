@@ -6,6 +6,16 @@
         <h1 class="text-xl font-semibold">Raumbelegungssystem</h1>
       </div>
 
+      <!-- Navigation -->
+      <nav class="hidden md:flex items-center space-x-6 mr-6">
+        <NuxtLink to="/" class="text-gray-600 hover:text-blue-500 font-medium transition-colors">
+          Startseite
+        </NuxtLink>
+        <NuxtLink to="/calendar" class="text-gray-600 hover:text-blue-500 font-medium transition-colors">
+          Kalender
+        </NuxtLink>
+      </nav>
+
       <div class="max-w-xs w-full">
         <input type="text"
                placeholder="Raum suchen..."

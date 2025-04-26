@@ -3,10 +3,13 @@ import { defineNuxtConfig } from 'nuxt/config'
 
 export default defineNuxtConfig({
   devtools: { enabled: true },
+
   modules: [
     '@pinia/nuxt',
-    '@nuxtjs/tailwindcss'
+    '@nuxtjs/tailwindcss',
+    'nuxt-mongoose',
   ],
+
   app: {
     head: {
       title: 'Raumbelegungssystem',
@@ -21,13 +24,17 @@ export default defineNuxtConfig({
       ]
     }
   },
+
   // TypeScript-Konfiguration
   typescript: {
     strict: true,
     typeCheck: true
   },
+
   alias: {
     '~': '/stores',
     '@': '/'
-  }
+  },
+
+  compatibilityDate: '2025-04-26'
 })
