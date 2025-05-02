@@ -13,7 +13,7 @@
           <select id="roomSelect"
                   class="w-full p-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
                   v-model="bookingData.roomId">
-            <option v-for="room in rooms" :key="room.id" :value="room.id">{{ room.name }}</option>
+            <option v-for="room in rooms" :key="room._id || room.id" :value="room._id || room.id">{{ room.name }}</option>
           </select>
         </div>
 
@@ -81,8 +81,9 @@
             Abbrechen
           </button>
           <button type="submit"
-                  class="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600">
-            Buchen
+                  class="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+                  :disabled="isSubmitting">
+            {{ isSubmitting ? 'Wird gespeichert...' : 'Buchen' }}
           </button>
         </div>
       </form>
@@ -115,6 +116,10 @@ const bookingData = ref({
   contactName: ''
 })
 
+// UI-States
+const isSubmitting = ref(false)
+const errorMessage = ref('')
+
 // Computed Properties
 const rooms = computed(() => roomStore.rooms)
 const timeSlots = computed(() => bookingStore.timeSlots)
@@ -130,6 +135,7 @@ function resetForm() {
     description: '',
     contactName: ''
   }
+  errorMessage.value = ''
 }
 
 function openModal(params = {}) {
@@ -150,29 +156,43 @@ function isTimeSlotBooked(slot) {
   )
 }
 
-function submitBooking() {
-  // Buchung hinzufügen
-  bookingStore.addBooking({
-    roomId: bookingData.value.roomId,
-    date: bookingData.value.date,
-    timeSlot: bookingData.value.timeSlot,
-    title: bookingData.value.title,
-    description: bookingData.value.description,
-    contactName: bookingData.value.contactName
-  })
+async function submitBooking() {
+  if (!bookingData.value.title || !bookingData.value.contactName || !bookingData.value.timeSlot) {
+    errorMessage.value = 'Bitte füllen Sie alle Pflichtfelder aus.'
+    return
+  }
 
-  // Modal schließen
-  closeModal()
+  isSubmitting.value = true
 
-  // Erfolgsmeldung anzeigen (könnte in einer echten App durch ein Toast/Notification-System ersetzt werden)
-  alert('Buchung erfolgreich gespeichert!')
+  try {
+    // Verwenden Sie die aktualisierte addBooking-Methode, die die API aufruft
+    await bookingStore.addBooking({
+      roomId: bookingData.value.roomId,
+      date: bookingData.value.date,
+      timeSlot: bookingData.value.timeSlot,
+      title: bookingData.value.title,
+      description: bookingData.value.description,
+      contactName: bookingData.value.contactName
+    })
+
+    // Modal schließen
+    closeModal()
+
+    // Erfolgsmeldung anzeigen
+    alert('Buchung erfolgreich gespeichert!')
+  } catch (error) {
+    errorMessage.value = `Fehler beim Speichern: ${error.message}`
+    console.error('Fehler beim Buchungsversuch:', error)
+    alert('Es gab ein Problem beim Speichern der Buchung. Bitte versuchen Sie es erneut.')
+  } finally {
+    isSubmitting.value = false
+  }
 }
 
 // Event-Listener für das öffnen des Modals
 defineExpose({ openModal })
 
-// Globales Event-Handling (in einer realen App könnte man Nuxt's $bus oder andere Event-Strategien verwenden)
-// Dies ist eine Vereinfachung für dieses Beispiel
+// Globales Event-Handling
 if (process.client) {
   window.addEventListener('openBookingModal', (event) => {
     openModal(event.detail)

@@ -1,4 +1,4 @@
-// server/api/rooms.get.js
+// server/api/rooms.js
 import { MongoClient } from 'mongodb'
 
 export default defineEventHandler(async (event) => {
@@ -7,7 +7,7 @@ export default defineEventHandler(async (event) => {
         const client = new MongoClient(process.env.MONGODB_URI || 'mongodb://localhost:27017')
         await client.connect()
 
-        const db = client.db('VestRoom_volumedish')
+        const db = client.db('raumbelegung')
         const collection = db.collection('rooms')
 
         // Alle Räume abrufen

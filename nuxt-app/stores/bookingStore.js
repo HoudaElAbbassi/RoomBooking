@@ -1,28 +1,10 @@
 // stores/bookingStore.js
-import { defineStore } from 'pinia'
+import { defineStore } from 'pinia';
+import {toObjectId} from "~~/server/utils/mongodb.js";
 
 export const useBookingStore = defineStore('booking', {
     state: () => ({
-        bookings: [
-            {
-                _id: '1',
-                roomId: '1',
-                title: "Team-Meeting",
-                description: "Wöchentliches Team-Meeting",
-                contactName: "Max Mustermann",
-                date: "2025-04-24",
-                timeSlot: "09:00"
-            },
-            {
-                _id: '2',
-                roomId: '2',
-                title: "Firmenpräsentation",
-                description: "Präsentation des Jahresberichts",
-                contactName: "Anna Schmidt",
-                date: "2025-04-24",
-                timeSlot: "14:00"
-            }
-        ],
+        bookings: [],
         timeSlots: [
             "08:00", "09:00", "10:00", "11:00",
             "12:00", "13:00", "14:00", "15:00",
@@ -36,7 +18,7 @@ export const useBookingStore = defineStore('booking', {
         getBookingsForRoomAndDate: (state) => (roomId, date) => {
             return state.bookings.filter(booking =>
                 booking.roomId === roomId && booking.date === date
-            )
+            );
         },
 
         isTimeSlotBooked: (state) => (roomId, date, timeSlot) => {
@@ -44,51 +26,83 @@ export const useBookingStore = defineStore('booking', {
                 booking.roomId === roomId &&
                 booking.date === date &&
                 booking.timeSlot === timeSlot
-            )
+            );
         }
     },
 
     actions: {
-        // Add the fetchBookings method
         async fetchBookings(filters = {}) {
             this.loading = true;
             this.error = null;
 
             try {
-                // For now, just simulate an API call with the hardcoded data
-                console.log('Fetching bookings with filters:', filters);
+                // Build query parameters
+                const queryParams = new URLSearchParams();
+                if (filters.roomId) queryParams.append('roomId', filters.roomId);
+                if (filters.date) queryParams.append('date', filters.date);
+                if (filters.startDate) queryParams.append('startDate', filters.startDate);
+                if (filters.endDate) queryParams.append('endDate', filters.endDate);
 
-                // We're not making a real API call yet since MongoDB isn't connected
-                // Filter the existing bookings based on the provided filters
-                let filteredBookings = [...this.bookings];
+                // Make the API call
+                const response = await fetch(`/api/bookings?${queryParams}`);
 
-                if (filters.roomId) {
-                    filteredBookings = filteredBookings.filter(booking =>
-                        booking.roomId === filters.roomId
-                    );
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.statusMessage || 'Failed to fetch bookings');
                 }
 
-                if (filters.date) {
-                    filteredBookings = filteredBookings.filter(booking =>
-                        booking.date === filters.date
-                    );
+                const data = await response.json();
+
+                // If specific filters are provided, only update the relevant bookings
+                if (filters.roomId || filters.date) {
+                    // Remove existing bookings that match the filter criteria
+                    this.bookings = this.bookings.filter(booking => {
+                        if (filters.roomId && filters.date) {
+                            return booking.roomId !== filters.roomId || booking.date !== filters.date;
+                        } else if (filters.roomId) {
+                            return booking.roomId !== filters.roomId;
+                        } else if (filters.date) {
+                            return booking.date !== filters.date;
+                        }
+                        return true;
+                    });
+
+                    // Add the new bookings
+                    this.bookings = [...this.bookings, ...data];
+                } else {
+                    // If no specific filters, replace all bookings
+                    this.bookings = data;
                 }
 
-                // Simulate a short delay
-                await new Promise(resolve => setTimeout(resolve, 300));
-
-                // In a real implementation with MongoDB, replace with:
-                // const queryParams = new URLSearchParams();
-                // if (filters.roomId) queryParams.append('roomId', filters.roomId);
-                // if (filters.date) queryParams.append('date', filters.date);
-                // const response = await fetch(`/api/bookings?${queryParams}`);
-                // const data = await response.json();
-                // this.bookings = data;
-
-                return filteredBookings;
+                return data;
             } catch (error) {
                 console.error('Error fetching bookings:', error);
                 this.error = error.message || 'Failed to fetch bookings';
+
+                // If the API call fails, use fallback data
+                if (this.bookings.length === 0 && !filters.roomId && !filters.date) {
+                    this.bookings = [
+                        {
+                            _id: '1',
+                            roomId: '1',
+                            title: "Team-Meeting",
+                            description: "Wöchentliches Team-Meeting",
+                            contactName: "Max Mustermann",
+                            date: "2025-05-02", // Using current date
+                            timeSlot: "09:00"
+                        },
+                        {
+                            _id: '2',
+                            roomId: '2',
+                            title: "Firmenpräsentation",
+                            description: "Präsentation des Jahresberichts",
+                            contactName: "Anna Schmidt",
+                            date: "2025-05-02", // Using current date
+                            timeSlot: "14:00"
+                        }
+                    ];
+                }
+
                 throw error;
             } finally {
                 this.loading = false;
@@ -98,44 +112,79 @@ export const useBookingStore = defineStore('booking', {
         async addBooking(booking) {
             this.loading = true;
             this.error = null;
+            const formattedBooking = {
+                ...booking,
+                roomId: booking.roomId.includes('-') ? booking.roomId : toObjectId(booking.roomId)
+            };
 
             try {
-                console.log('Adding booking:', booking);
+                const response = await fetch('/api/bookings', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(formattedBooking)
+                });
 
-                // Create a new booking with a generated ID
-                const newId = Math.max(0, ...this.bookings.map(b => parseInt(b._id) || 0)) + 1;
-                const newBooking = {
-                    _id: newId.toString(),
-                    ...booking
-                };
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.statusMessage || 'Failed to add booking');
+                }
 
-                // In a real implementation with MongoDB, replace with:
-                // const response = await fetch('/api/bookings', {
-                //     method: 'POST',
-                //     headers: { 'Content-Type': 'application/json' },
-                //     body: JSON.stringify(booking)
-                // });
-                // const newBooking = await response.json();
+                const newBooking = await response.json();
+
 
                 // Add to local state
                 this.bookings.push(newBooking);
-
-                // Simulate a short delay
-                await new Promise(resolve => setTimeout(resolve, 300));
 
                 return newBooking;
             } catch (error) {
                 console.error('Error adding booking:', error);
                 this.error = error.message || 'Failed to add booking';
+
+                // If in development mode, create a fake booking with an ID
+                if (process.env.NODE_ENV === 'development') {
+                    console.warn('Development mode: Creating fake booking');
+                    const newId = Math.max(0, ...this.bookings.map(b => parseInt(b._id) || 0)) + 1;
+                    const newBooking = {
+                        _id: newId.toString(),
+                        ...booking
+                    };
+                    this.bookings.push(newBooking);
+                    return newBooking;
+                }
+
                 throw error;
-            } finally {
+            } finally {ç
                 this.loading = false;
             }
         },
 
-        // Keep backward compatibility
-        loadFromLocalStorage() {
-            console.log('Bookings loaded (compatibility method)')
+        async deleteBooking(bookingId) {
+            this.loading = true;
+            this.error = null;
+
+            try {
+                const response = await fetch(`/api/bookings/${bookingId}`, {
+                    method: 'DELETE'
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.statusMessage || 'Failed to delete booking');
+                }
+
+                // Remove from local state
+                this.bookings = this.bookings.filter(booking => booking._id !== bookingId);
+
+                return { success: true };
+            } catch (error) {
+                console.error('Error deleting booking:', error);
+                this.error = error.message || 'Failed to delete booking';
+                throw error;
+            } finally {
+                this.loading = false;
+            }
         }
     }
 })

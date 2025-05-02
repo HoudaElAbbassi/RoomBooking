@@ -6,8 +6,7 @@ export default defineNuxtConfig({
 
   modules: [
     '@pinia/nuxt',
-    '@nuxtjs/tailwindcss',
-    'nuxt-mongoose',
+    '@nuxtjs/tailwindcss'
   ],
 
   app: {
@@ -16,7 +15,7 @@ export default defineNuxtConfig({
       meta: [
         { charset: 'utf-8' },
         { name: 'viewport', content: 'width=device-width, initial-scale=1' },
-        { name: 'description', content: 'Einfaches Raumbelegungssystem ohne Login' }
+        { name: 'description', content: 'Einfaches Raumbelegungssystem mit MongoDB Integration' }
       ],
       link: [
         { rel: 'icon', type: 'image/x-icon', href: '/favicon.ico' },
@@ -36,5 +35,27 @@ export default defineNuxtConfig({
     '@': '/'
   },
 
-  compatibilityDate: '2025-04-26'
+  // Runtimeconfig für Umgebungsvariablen
+  runtimeConfig: {
+    // Server-seitige Umgebungsvariablen
+    mongodb: {
+      uri: process.env.MONGODB_URI || 'mongodb://localhost:27017',
+      dbName: process.env.MONGODB_DB || 'VestRoom_volumedish'
+    },
+    // Öffentliche Variablen (nicht sensible Daten)
+    public: {
+      apiBase: '/api'
+    }
+  },
+
+  mongoose: {
+    uri: process.env.MONGODB_URI,
+    options: {
+      directConnection: true,
+      serverSelectionTimeoutMS: 500000,
+      appName: 'Raumbelegungssystem'
+    }
+  },
+
+  compatibilityDate: '2025-04-28'
 })
