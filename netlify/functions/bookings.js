@@ -1,39 +1,104 @@
-// netlify/functions/bookings.js
+// netlify/functions/bookings.js - Production-ready mit Environment Validation
 const { Pool } = require('pg');
 
-// Connection Pool für bessere Performance
-const pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
-    ssl: { rejectUnauthorized: false },
-    max: 1, // Wichtig für Serverless Functions
-    idleTimeoutMillis: 30000,
-    connectionTimeoutMillis: 2000,
-});
+// Environment Variable Validation
+function validateEnvironment() {
+    const dbUrl = process.env.DATABASE_URL;
+
+    console.log('🔍 Environment Validation:');
+    console.log('- DATABASE_URL exists:', !!dbUrl);
+    console.log('- Deploy Context:', process.env.CONTEXT || 'unknown');
+    console.log('- Deploy ID:', process.env.DEPLOY_ID || 'unknown');
+
+    if (!dbUrl) {
+        console.error('❌ DATABASE_URL not found in environment');
+        console.log('Available env vars:', Object.keys(process.env).filter(k =>
+            k.toLowerCase().includes('database') || k.toLowerCase().includes('neon')
+        ));
+        throw new Error('DATABASE_URL environment variable not configured');
+    }
+
+    if (dbUrl.includes('localhost') || dbUrl.includes('127.0.0.1')) {
+        throw new Error('DATABASE_URL points to localhost - should point to Neon');
+    }
+
+    if (!dbUrl.startsWith('postgresql://')) {
+        throw new Error('DATABASE_URL must start with postgresql://');
+    }
+
+    console.log('✅ Environment validation passed');
+    console.log('- URL prefix:', dbUrl.substring(0, 25) + '...');
+    console.log('- Contains neon.tech:', dbUrl.includes('neon.tech'));
+
+    return dbUrl;
+}
 
 exports.handler = async (event, context) => {
-    // CORS Headers
     const headers = {
         'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Headers': 'Content-Type',
-        'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
         'Content-Type': 'application/json'
     };
 
-    // Handle preflight requests
+    // Log request info
+    console.log(`📡 ${event.httpMethod} ${event.path} - Deploy: ${process.env.DEPLOY_ID || 'unknown'}`);
+
     if (event.httpMethod === 'OPTIONS') {
+        return { statusCode: 200, headers };
+    }
+
+    let dbUrl;
+    try {
+        dbUrl = validateEnvironment();
+    } catch (error) {
+        console.error('Environment validation failed:', error.message);
         return {
-            statusCode: 200,
+            statusCode: 500,
             headers,
-            body: ''
+            body: JSON.stringify({
+                error: 'Configuration error',
+                details: error.message,
+                timestamp: new Date().toISOString(),
+                deployId: process.env.DEPLOY_ID || 'unknown'
+            })
         };
     }
 
-    let client;
-    try {
-        // Database connection
-        client = await pool.connect();
+    // Database pool configuration
+    const pool = new Pool({
+        connectionString: dbUrl,
+        ssl: {
+            rejectUnauthorized: false,
+            require: true
+        },
+        max: 1, // Important for serverless
+        min: 0,
+        acquireTimeoutMillis: 60000,
+        createTimeoutMillis: 30000,
+        destroyTimeoutMillis: 5000,
+        idleTimeoutMillis: 30000,
+    });
 
-        // GET - Buchungen abrufen (mit optionalen Filtern)
+    let client;
+    const startTime = Date.now();
+
+    try {
+        console.log('🔄 Acquiring database connection...');
+
+        // Connection with timeout
+        const connectPromise = pool.connect();
+        const timeoutPromise = new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('Connection timeout')), 15000)
+        );
+
+        client = await Promise.race([connectPromise, timeoutPromise]);
+        const connectionTime = Date.now() - startTime;
+
+        console.log(`✅ Database connected in ${connectionTime}ms`);
+
+        // Verify database is responding
+        await client.query('SELECT 1');
+        console.log('✅ Database responding to queries');
+
         if (event.httpMethod === 'GET') {
             const { roomId, date, startDate, endDate } = event.queryStringParameters || {};
 
@@ -46,27 +111,22 @@ exports.handler = async (event, context) => {
           b.contact_name, 
           b.booking_date as date, 
           TO_CHAR(b.time_slot, 'HH24:MI') as time_slot,
-          b.created_at,
-          r.name as room_name 
+          b.created_at
         FROM bookings b 
-        JOIN rooms r ON b.room_id = r.id 
       `;
             const params = [];
             const conditions = [];
 
-            // Filter nach Raum
             if (roomId) {
                 conditions.push(`b.room_id = $${params.length + 1}`);
                 params.push(parseInt(roomId));
             }
 
-            // Filter nach spezifischem Datum
             if (date) {
                 conditions.push(`b.booking_date = $${params.length + 1}`);
                 params.push(date);
             }
 
-            // Filter nach Datumsbereich
             if (startDate && endDate) {
                 conditions.push(`b.booking_date BETWEEN $${params.length + 1} AND $${params.length + 2}`);
                 params.push(startDate, endDate);
@@ -78,7 +138,9 @@ exports.handler = async (event, context) => {
 
             query += ' ORDER BY b.booking_date, b.time_slot';
 
+            console.log(`📊 Executing query with ${params.length} parameters`);
             const result = await client.query(query, params);
+            console.log(`✅ Query returned ${result.rows.length} rows`);
 
             return {
                 statusCode: 200,
@@ -87,57 +149,31 @@ exports.handler = async (event, context) => {
             };
         }
 
-        // POST - Neue Buchung erstellen
         if (event.httpMethod === 'POST') {
             const { roomId, title, description, contactName, date, timeSlot } = JSON.parse(event.body);
 
-            // Validierung der Pflichtfelder
+            console.log(`📝 Creating booking: Room ${roomId}, ${date} ${timeSlot}`);
+
+            // Validation
             if (!roomId || !title || !contactName || !date || !timeSlot) {
                 return {
                     statusCode: 400,
                     headers,
                     body: JSON.stringify({
-                        error: 'RoomId, title, contactName, date und timeSlot sind erforderlich'
+                        error: 'Fehlende Pflichtfelder',
+                        required: ['roomId', 'title', 'contactName', 'date', 'timeSlot']
                     })
                 };
             }
 
-            // Validierung des Datums (nicht in der Vergangenheit)
-            const bookingDate = new Date(date);
-            const today = new Date();
-            today.setHours(0, 0, 0, 0);
-
-            if (bookingDate < today) {
-                return {
-                    statusCode: 400,
-                    headers,
-                    body: JSON.stringify({
-                        error: 'Buchungen können nicht in der Vergangenheit erstellt werden'
-                    })
-                };
-            }
-
-            // Prüfen ob der Raum existiert
-            const roomCheck = await client.query(
-                'SELECT id FROM rooms WHERE id = $1',
-                [parseInt(roomId)]
-            );
-
-            if (roomCheck.rows.length === 0) {
-                return {
-                    statusCode: 404,
-                    headers,
-                    body: JSON.stringify({ error: 'Raum nicht gefunden' })
-                };
-            }
-
-            // Prüfen ob der Zeitslot bereits belegt ist
+            // Check for existing booking
             const existingBooking = await client.query(
                 'SELECT id FROM bookings WHERE room_id = $1 AND booking_date = $2 AND time_slot = $3',
                 [parseInt(roomId), date, timeSlot]
             );
 
             if (existingBooking.rows.length > 0) {
+                console.log('⚠️ Time slot already booked');
                 return {
                     statusCode: 409,
                     headers,
@@ -145,7 +181,7 @@ exports.handler = async (event, context) => {
                 };
             }
 
-            // Neue Buchung erstellen
+            // Create booking
             const result = await client.query(
                 `INSERT INTO bookings (room_id, title, description, contact_name, booking_date, time_slot) 
          VALUES ($1, $2, $3, $4, $5, $6) 
@@ -158,15 +194,10 @@ exports.handler = async (event, context) => {
            booking_date as date, 
            TO_CHAR(time_slot, 'HH24:MI') as time_slot,
            created_at`,
-                [
-                    parseInt(roomId),
-                    title,
-                    description || '',
-                    contactName,
-                    date,
-                    timeSlot
-                ]
+                [parseInt(roomId), title, description || '', contactName, date, timeSlot]
             );
+
+            console.log(`✅ Booking created with ID ${result.rows[0].id}`);
 
             return {
                 statusCode: 201,
@@ -175,101 +206,6 @@ exports.handler = async (event, context) => {
             };
         }
 
-        // PUT - Buchung aktualisieren
-        if (event.httpMethod === 'PUT') {
-            const bookingId = event.path.split('/').pop();
-            const { roomId, title, description, contactName, date, timeSlot } = JSON.parse(event.body);
-
-            // Validierung
-            if (!roomId || !title || !contactName || !date || !timeSlot) {
-                return {
-                    statusCode: 400,
-                    headers,
-                    body: JSON.stringify({
-                        error: 'RoomId, title, contactName, date und timeSlot sind erforderlich'
-                    })
-                };
-            }
-
-            // Prüfen ob andere Buchung bereits diesen Zeitslot belegt (außer der aktuellen)
-            const existingBooking = await client.query(
-                'SELECT id FROM bookings WHERE room_id = $1 AND booking_date = $2 AND time_slot = $3 AND id != $4',
-                [parseInt(roomId), date, timeSlot, parseInt(bookingId)]
-            );
-
-            if (existingBooking.rows.length > 0) {
-                return {
-                    statusCode: 409,
-                    headers,
-                    body: JSON.stringify({ error: 'Dieser Zeitslot ist bereits belegt' })
-                };
-            }
-
-            const result = await client.query(
-                `UPDATE bookings 
-         SET room_id = $1, title = $2, description = $3, contact_name = $4, 
-             booking_date = $5, time_slot = $6
-         WHERE id = $7
-         RETURNING 
-           id, 
-           room_id, 
-           title, 
-           description, 
-           contact_name, 
-           booking_date as date, 
-           TO_CHAR(time_slot, 'HH24:MI') as time_slot,
-           created_at`,
-                [
-                    parseInt(roomId),
-                    title,
-                    description || '',
-                    contactName,
-                    date,
-                    timeSlot,
-                    parseInt(bookingId)
-                ]
-            );
-
-            if (result.rows.length === 0) {
-                return {
-                    statusCode: 404,
-                    headers,
-                    body: JSON.stringify({ error: 'Buchung nicht gefunden' })
-                };
-            }
-
-            return {
-                statusCode: 200,
-                headers,
-                body: JSON.stringify(result.rows[0])
-            };
-        }
-
-        // DELETE - Buchung löschen
-        if (event.httpMethod === 'DELETE') {
-            const bookingId = event.path.split('/').pop();
-
-            const result = await client.query(
-                'DELETE FROM bookings WHERE id = $1 RETURNING *',
-                [parseInt(bookingId)]
-            );
-
-            if (result.rows.length === 0) {
-                return {
-                    statusCode: 404,
-                    headers,
-                    body: JSON.stringify({ error: 'Buchung nicht gefunden' })
-                };
-            }
-
-            return {
-                statusCode: 200,
-                headers,
-                body: JSON.stringify({ message: 'Buchung erfolgreich gelöscht' })
-            };
-        }
-
-        // Method not allowed
         return {
             statusCode: 405,
             headers,
@@ -277,18 +213,50 @@ exports.handler = async (event, context) => {
         };
 
     } catch (error) {
-        console.error('Database error:', error);
+        const connectionTime = Date.now() - startTime;
+        console.error(`❌ Database error after ${connectionTime}ms:`, error);
+
+        // Detailed error classification
+        let errorType = 'Database error';
+        let suggestion = 'Check logs for details';
+
+        if (error.message.includes('ECONNREFUSED')) {
+            errorType = 'Connection refused';
+            suggestion = 'Verify DATABASE_URL hostname and port';
+        } else if (error.message.includes('ENOTFOUND')) {
+            errorType = 'Host not found';
+            suggestion = 'Check if Neon hostname is correct in DATABASE_URL';
+        } else if (error.message.includes('timeout')) {
+            errorType = 'Connection timeout';
+            suggestion = 'Database may be sleeping, try again in a moment';
+        } else if (error.message.includes('authentication')) {
+            errorType = 'Authentication failed';
+            suggestion = 'Verify username and password in DATABASE_URL';
+        } else if (error.message.includes('does not exist')) {
+            errorType = 'Database or table not found';
+            suggestion = 'Run database schema setup';
+        }
 
         return {
             statusCode: 500,
             headers,
             body: JSON.stringify({
-                error: 'Datenbankfehler',
-                details: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+                error: errorType,
+                suggestion: suggestion,
+                details: error.message,
+                timestamp: new Date().toISOString(),
+                deployId: process.env.DEPLOY_ID || 'unknown',
+                connectionTime: connectionTime
             })
         };
     } finally {
-        // Connection wieder freigeben
-        if (client) client.release();
+        if (client) {
+            try {
+                client.release();
+                console.log('🔄 Database connection released');
+            } catch (e) {
+                console.warn('⚠️ Error releasing connection:', e.message);
+            }
+        }
     }
 };
