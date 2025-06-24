@@ -1,6 +1,5 @@
 // stores/bookingStore.js
 import { defineStore } from 'pinia';
-import {toObjectId} from "~~/server/utils/mongodb.js";
 
 export const useBookingStore = defineStore('booking', {
     state: () => ({
@@ -17,15 +16,15 @@ export const useBookingStore = defineStore('booking', {
     getters: {
         getBookingsForRoomAndDate: (state) => (roomId, date) => {
             return state.bookings.filter(booking =>
-                booking.roomId === roomId && booking.date === date
+                booking.room_id == roomId && booking.date === date
             );
         },
 
         isTimeSlotBooked: (state) => (roomId, date, timeSlot) => {
             return state.bookings.some(booking =>
-                booking.roomId === roomId &&
+                booking.room_id == roomId &&
                 booking.date === date &&
-                booking.timeSlot === timeSlot
+                booking.time_slot === timeSlot
             );
         }
     },
@@ -43,12 +42,11 @@ export const useBookingStore = defineStore('booking', {
                 if (filters.startDate) queryParams.append('startDate', filters.startDate);
                 if (filters.endDate) queryParams.append('endDate', filters.endDate);
 
-                // Make the API call
-                const response = await fetch(`/api/bookings?${queryParams}`);
+                // Verwende Netlify Functions
+                const response = await fetch(`/.netlify/functions/bookings?${queryParams}`);
 
                 if (!response.ok) {
-                    const errorData = await response.json();
-                    throw new Error(errorData.statusMessage || 'Failed to fetch bookings');
+                    throw new Error(`HTTP error! status: ${response.status}`);
                 }
 
                 const data = await response.json();
@@ -58,9 +56,9 @@ export const useBookingStore = defineStore('booking', {
                     // Remove existing bookings that match the filter criteria
                     this.bookings = this.bookings.filter(booking => {
                         if (filters.roomId && filters.date) {
-                            return booking.roomId !== filters.roomId || booking.date !== filters.date;
+                            return booking.room_id != filters.roomId || booking.date !== filters.date;
                         } else if (filters.roomId) {
-                            return booking.roomId !== filters.roomId;
+                            return booking.room_id != filters.roomId;
                         } else if (filters.date) {
                             return booking.date !== filters.date;
                         }
@@ -77,28 +75,28 @@ export const useBookingStore = defineStore('booking', {
                 return data;
             } catch (error) {
                 console.error('Error fetching bookings:', error);
-                this.error = error.message || 'Failed to fetch bookings';
+                this.error = error.message;
 
-                // If the API call fails, use fallback data
+                // Fallback zu lokalen Daten wenn API fehlschlägt
                 if (this.bookings.length === 0 && !filters.roomId && !filters.date) {
                     this.bookings = [
                         {
-                            _id: '1',
-                            roomId: '1',
+                            id: 1,
+                            room_id: 1,
                             title: "Team-Meeting",
                             description: "Wöchentliches Team-Meeting",
-                            contactName: "Max Mustermann",
-                            date: "2025-05-02", // Using current date
-                            timeSlot: "09:00"
+                            contact_name: "Max Mustermann",
+                            date: new Date().toISOString().split('T')[0],
+                            time_slot: "09:00"
                         },
                         {
-                            _id: '2',
-                            roomId: '2',
+                            id: 2,
+                            room_id: 2,
                             title: "Firmenpräsentation",
                             description: "Präsentation des Jahresberichts",
-                            contactName: "Anna Schmidt",
-                            date: "2025-05-02", // Using current date
-                            timeSlot: "14:00"
+                            contact_name: "Anna Schmidt",
+                            date: new Date().toISOString().split('T')[0],
+                            time_slot: "14:00"
                         }
                     ];
                 }
@@ -112,27 +110,29 @@ export const useBookingStore = defineStore('booking', {
         async addBooking(booking) {
             this.loading = true;
             this.error = null;
-            const formattedBooking = {
-                ...booking,
-                roomId: booking.roomId.includes('-') ? booking.roomId : toObjectId(booking.roomId)
-            };
 
             try {
-                const response = await fetch('/api/bookings', {
+                const response = await fetch('/.netlify/functions/bookings', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify(formattedBooking)
+                    body: JSON.stringify({
+                        roomId: booking.roomId,
+                        title: booking.title,
+                        description: booking.description,
+                        contactName: booking.contactName,
+                        date: booking.date,
+                        timeSlot: booking.timeSlot
+                    })
                 });
 
                 if (!response.ok) {
                     const errorData = await response.json();
-                    throw new Error(errorData.statusMessage || 'Failed to add booking');
+                    throw new Error(errorData.error || 'Failed to add booking');
                 }
 
                 const newBooking = await response.json();
-
 
                 // Add to local state
                 this.bookings.push(newBooking);
@@ -140,22 +140,27 @@ export const useBookingStore = defineStore('booking', {
                 return newBooking;
             } catch (error) {
                 console.error('Error adding booking:', error);
-                this.error = error.message || 'Failed to add booking';
+                this.error = error.message;
 
-                // If in development mode, create a fake booking with an ID
+                // Fallback für Development
                 if (process.env.NODE_ENV === 'development') {
                     console.warn('Development mode: Creating fake booking');
-                    const newId = Math.max(0, ...this.bookings.map(b => parseInt(b._id) || 0)) + 1;
+                    const newId = Math.max(0, ...this.bookings.map(b => parseInt(b.id) || 0)) + 1;
                     const newBooking = {
-                        _id: newId.toString(),
-                        ...booking
+                        id: newId,
+                        room_id: booking.roomId,
+                        title: booking.title,
+                        description: booking.description,
+                        contact_name: booking.contactName,
+                        date: booking.date,
+                        time_slot: booking.timeSlot
                     };
                     this.bookings.push(newBooking);
                     return newBooking;
                 }
 
                 throw error;
-            } finally {ç
+            } finally {
                 this.loading = false;
             }
         },
@@ -165,22 +170,22 @@ export const useBookingStore = defineStore('booking', {
             this.error = null;
 
             try {
-                const response = await fetch(`/api/bookings/${bookingId}`, {
+                const response = await fetch(`/.netlify/functions/bookings/${bookingId}`, {
                     method: 'DELETE'
                 });
 
                 if (!response.ok) {
                     const errorData = await response.json();
-                    throw new Error(errorData.statusMessage || 'Failed to delete booking');
+                    throw new Error(errorData.error || 'Failed to delete booking');
                 }
 
                 // Remove from local state
-                this.bookings = this.bookings.filter(booking => booking._id !== bookingId);
+                this.bookings = this.bookings.filter(booking => booking.id != bookingId);
 
                 return { success: true };
             } catch (error) {
                 console.error('Error deleting booking:', error);
-                this.error = error.message || 'Failed to delete booking';
+                this.error = error.message;
                 throw error;
             } finally {
                 this.loading = false;

@@ -11,7 +11,7 @@ export const useRoomStore = defineStore('room', {
 
     getters: {
         getSelectedRoom() {
-            return this.rooms.find(room => room._id === this.selectedRoomId)
+            return this.rooms.find(room => room.id === this.selectedRoomId)
         }
     },
 
@@ -21,12 +21,11 @@ export const useRoomStore = defineStore('room', {
             this.error = null;
 
             try {
-                // Make a real API call to the MongoDB backend
-                const response = await fetch('/api/rooms');
+                // Verwende Netlify Functions statt /api/
+                const response = await fetch('/.netlify/functions/rooms');
 
                 if (!response.ok) {
-                    const errorData = await response.json();
-                    throw new Error(errorData.statusMessage || 'Failed to fetch rooms');
+                    throw new Error(`HTTP error! status: ${response.status}`);
                 }
 
                 const data = await response.json();
@@ -34,19 +33,19 @@ export const useRoomStore = defineStore('room', {
 
                 // Set default selected room if none is selected
                 if (this.rooms.length > 0 && !this.selectedRoomId) {
-                    this.selectedRoomId = this.rooms[0]._id;
+                    this.selectedRoomId = this.rooms[0].id;
                 }
 
                 return this.rooms;
             } catch (error) {
                 console.error('Error fetching rooms:', error);
-                this.error = error.message || 'Failed to fetch rooms';
+                this.error = error.message;
 
-                // Fallback to sample data if API fails
+                // Fallback zu lokalen Daten wenn API fehlschlägt
                 if (this.rooms.length === 0) {
                     this.rooms = [
                         {
-                            _id: '1',
+                            id: 1,
                             name: "Jemia",
                             capacity: 30,
                             location: "Heinrich Lübcke Strasse 2",
@@ -54,7 +53,7 @@ export const useRoomStore = defineStore('room', {
                             description: "Ideal für kleinere Team-Meetings und Präsentationen."
                         },
                         {
-                            _id: '2',
+                            id: 2,
                             name: "TestRaum 2",
                             capacity: 30,
                             location: "Gebäude B, 2. Stock",
@@ -64,7 +63,7 @@ export const useRoomStore = defineStore('room', {
                     ];
 
                     if (!this.selectedRoomId) {
-                        this.selectedRoomId = '1';
+                        this.selectedRoomId = 1;
                     }
                 }
 
@@ -79,7 +78,7 @@ export const useRoomStore = defineStore('room', {
             this.error = null;
 
             try {
-                const response = await fetch('/api/rooms', {
+                const response = await fetch('/.netlify/functions/rooms', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -89,7 +88,7 @@ export const useRoomStore = defineStore('room', {
 
                 if (!response.ok) {
                     const errorData = await response.json();
-                    throw new Error(errorData.statusMessage || 'Failed to add room');
+                    throw new Error(errorData.error || 'Failed to add room');
                 }
 
                 const newRoom = await response.json();
@@ -97,7 +96,7 @@ export const useRoomStore = defineStore('room', {
                 return newRoom;
             } catch (error) {
                 console.error('Error adding room:', error);
-                this.error = error.message || 'Failed to add room';
+                this.error = error.message;
                 throw error;
             } finally {
                 this.loading = false;
