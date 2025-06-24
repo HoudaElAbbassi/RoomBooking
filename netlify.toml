@@ -1,8 +1,10 @@
 [build]
-  base = "nuxt-app"
-  command = "npm run generate"
-  publish = "dist"
-  functions = "../netlify/functions"
+  command = "npm install && cd nuxt-app && npm ci && npm run generate"
+  publish = "nuxt-app/dist"
+  functions = "netlify/functions"
+
+[functions]
+  directory = "netlify/functions"
 
 [dev]
   command = "npm run dev"

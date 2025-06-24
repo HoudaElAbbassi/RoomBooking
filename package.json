@@ -5,6 +5,6 @@
     "pg": "^8.11.3"
   },
   "scripts": {
-    "build": "cd nuxt-app && npm install && npm ci && npm run generate"
+    "build": "npm install && cd nuxt-app && npm ci && npm run generate"
   }
 }
