@@ -127,10 +127,11 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRoomStore } from '../stores/roomStore'
 import { useBookingStore } from '../stores/bookingStore'
 import { useUserStore } from '../stores/userStore'
+import DashboardQuickActions from '../components/DashboardQuickActions.vue'
 
 // Middleware für Authentication
 definePageMeta({

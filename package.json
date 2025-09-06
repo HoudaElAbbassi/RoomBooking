@@ -2,6 +2,8 @@
   "name": "roombooking-netlify",
   "private": true,
   "dependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/jsonwebtoken": "^9.0.10",
     "bcryptjs": "^2.4.3",
     "dotenv": "^16.5.0",
     "jsonwebtoken": "^9.0.2",
