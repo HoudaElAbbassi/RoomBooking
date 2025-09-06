@@ -2,10 +2,14 @@
   "name": "roombooking-netlify",
   "private": true,
   "dependencies": {
+    "bcryptjs": "^2.4.3",
     "dotenv": "^16.5.0",
+    "jsonwebtoken": "^9.0.2",
     "pg": "^8.11.3"
   },
   "scripts": {
-    "build": "cd nuxt-app && npm ci && npm run generate"
+    "build": "cd nuxt-app && npm ci && npm run generate",
+    "dev": "cd nuxt-app && npm run dev",
+    "test-db": "node test-connection.js"
   }
 }
