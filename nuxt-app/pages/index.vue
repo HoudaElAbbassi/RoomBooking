@@ -1,4 +1,4 @@
-<!-- pages/index.vue -->
+<!-- nuxt-app/pages/index.vue -->
 <template>
   <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
     <!-- Linke Seitenleiste - Raumliste -->
@@ -21,6 +21,16 @@
 
     <!-- Rechte Inhaltsseite -->
     <div class="md:col-span-3 space-y-6">
+      <!-- Welcome Message -->
+      <div class="bg-blue-50 border border-blue-200 rounded-lg p-4">
+        <h2 class="text-lg font-semibold text-blue-900">
+          Willkommen, {{ userStore.userDisplayName }}!
+        </h2>
+        <p class="text-blue-700">
+          Sie sind als {{ userStore.user?.role === 'admin' ? 'Administrator' : 'Benutzer' }} angemeldet.
+        </p>
+      </div>
+
       <!-- Raumdetails -->
       <div class="bg-white rounded-lg shadow p-6" v-if="selectedRoom">
         <h2 class="text-2xl font-semibold mb-3">{{ selectedRoom.name }}</h2>
@@ -104,10 +114,10 @@
                class="p-3 border rounded-md">
             <div class="flex justify-between">
               <strong>{{ booking.title }}</strong>
-              <span>{{ booking.date }}, {{ booking.timeSlot }} Uhr</span>
+              <span>{{ booking.date }}, {{ booking.timeSlot || booking.time_slot }} Uhr</span>
             </div>
             <div class="text-gray-600 text-sm">
-              Kontakt: {{ booking.contactName }}
+              Kontakt: {{ booking.contactName || booking.contact_name }}
             </div>
           </div>
         </div>
@@ -120,15 +130,22 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRoomStore } from '../stores/roomStore'
 import { useBookingStore } from '../stores/bookingStore'
+import { useUserStore } from '../stores/userStore'
+
+// Middleware für Authentication
+definePageMeta({
+  middleware: ['auth']
+})
 
 // Store-Instanzen
 const roomStore = useRoomStore()
 const bookingStore = useBookingStore()
+const userStore = useUserStore()
 
 // UI-States
 const isSubmitting = ref(false)
 const submitError = ref('')
-const isLoading = computed(() => roomStore.isLoading || bookingStore.isLoading)
+const isLoading = computed(() => roomStore.loading || bookingStore.loading)
 
 // Raumdaten
 const rooms = computed(() => roomStore.rooms)
@@ -142,13 +159,20 @@ const roomBookings = computed(() =>
     bookingStore.getBookingsForRoomAndDate(selectedRoomId.value, bookingData.value.date)
 )
 
-// Formulardaten
+// Formulardaten mit Benutzerinformationen vorausgefüllt
 const bookingData = ref({
   date: today.value,
   timeSlot: '09:00',
   title: '',
   contactName: ''
 })
+
+// Watch userStore and update contactName when user is available
+watch(() => userStore.userDisplayName, (newName) => {
+  if (newName && newName !== 'Guest' && !bookingData.value.contactName) {
+    bookingData.value.contactName = newName
+  }
+}, { immediate: true })
 
 // Methoden
 function selectRoom(roomId) {
@@ -171,12 +195,13 @@ async function submitBooking() {
       timeSlot: bookingData.value.timeSlot,
       title: bookingData.value.title,
       contactName: bookingData.value.contactName,
-      description: ''
+      description: '',
+      userId: userStore.user?.id // Füge Benutzer-ID hinzu
     })
 
     // Formular zurücksetzen
     bookingData.value.title = ''
-    bookingData.value.contactName = ''
+    // Behalte contactName für nächste Buchung
 
     alert('Buchung erfolgreich gespeichert!')
   } catch (error) {
@@ -198,7 +223,9 @@ onMounted(async () => {
   } catch (error) {
     console.error('Fehler beim Laden der Daten:', error)
     // Als Fallback lokale Daten laden
-    bookingStore.loadFromLocalStorage()
+    if (bookingStore.bookings.length === 0) {
+      bookingStore.loadFromLocalStorage?.()
+    }
   }
 })
 </script>

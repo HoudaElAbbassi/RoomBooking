@@ -1,3 +1,4 @@
+<!-- nuxt-app/pages/calendar.vue -->
 <template>
   <div>
     <div class="mb-6">
@@ -48,9 +49,14 @@
 </template>
 
 <script setup>
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useRoomStore } from '../stores/roomStore'
 import Calendar from '../components/Calendar.vue'
+
+// Middleware für Authentication
+definePageMeta({
+  middleware: ['auth']
+})
 
 const roomStore = useRoomStore()
 const rooms = computed(() => roomStore.rooms)
@@ -80,7 +86,8 @@ watch(selectedRoomIds, (newValue) => {
 }, { deep: true })
 
 // Beim Laden alle Räume anzeigen
-onMounted(() => {
+onMounted(async () => {
+  await roomStore.fetchRooms()
   initializeRoomFilter()
 })
 </script>
