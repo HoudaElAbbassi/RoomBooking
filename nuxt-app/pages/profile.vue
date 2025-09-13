@@ -348,19 +348,44 @@ async function changePassword() {
     return
   }
 
-  if (passwordForm.value.newPassword.length < 8) {
-    passwordError.value = 'Das neue Passwort muss mindestens 8 Zeichen lang sein'
+  // Validierung der Passwort-Komplexität
+  const validation = validatePassword(passwordForm.value.newPassword)
+  if (!validation.valid) {
+    passwordError.value = validation.message
     return
   }
 
   isChangingPassword.value = true
 
   try {
-    // Implementiere Passwort-Änderung
-    // Für jetzt Dummy-Implementation
-    await new Promise(resolve => setTimeout(resolve, 1000))
+    // API-Aufruf zur Passwortänderung
+    const response = await fetch('/.netlify/functions/password/change-password', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
+      },
+      body: JSON.stringify({
+        currentPassword: passwordForm.value.currentPassword,
+        newPassword: passwordForm.value.newPassword
+      })
+    })
 
-    passwordSuccess.value = 'Passwort erfolgreich geändert!'
+    const data = await response.json()
+
+    if (!response.ok) {
+      throw new Error(data.error || 'Fehler beim Ändern des Passworts')
+    }
+
+    // Erfolgsmeldung anzeigen
+    if (process.client && window.$toast) {
+      window.$toast.success('Passwort erfolgreich geändert. Sie werden abgemeldet...', {
+        title: 'Passwort geändert',
+        duration: 5000
+      })
+    } else {
+      passwordSuccess.value = 'Passwort erfolgreich geändert. Sie werden abgemeldet...'
+    }
 
     // Reset form
     passwordForm.value = {
@@ -369,40 +394,53 @@ async function changePassword() {
       confirmPassword: ''
     }
 
+    // Kurze Verzögerung, dann Abmeldung
     setTimeout(() => {
-      passwordSuccess.value = ''
+      userStore.logout()
     }, 3000)
+
   } catch (error) {
+    console.error('Passwortänderung fehlgeschlagen:', error)
     passwordError.value = error.message || 'Fehler beim Ändern des Passworts'
+
+    if (process.client && window.$toast) {
+      window.$toast.error(passwordError.value, {
+        title: 'Fehler',
+        duration: 5000
+      })
+    }
   } finally {
     isChangingPassword.value = false
   }
 }
 
-async function cancelBooking(bookingId) {
-  if (confirm('Sind Sie sicher, dass Sie diese Buchung stornieren möchten?')) {
-    try {
-      await bookingStore.deleteBooking(bookingId)
-      alert('Buchung erfolgreich storniert!')
-    } catch (error) {
-      alert('Fehler beim Stornieren: ' + error.message)
+// Hilfsfunktion zur Validierung der Passwort-Komplexität
+function validatePassword(password) {
+  // Mindestens 8 Zeichen
+  if (password.length < 8) {
+    return { valid: false, message: 'Passwort muss mindestens 8 Zeichen lang sein' }
+  }
+
+  // Prüfung auf Komplexität
+  const hasUpperCase = /[A-Z]/.test(password)
+  const hasLowerCase = /[a-z]/.test(password)
+  const hasNumbers = /\d/.test(password)
+  const hasSpecialChar = /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]+/.test(password)
+
+  if (!hasUpperCase || !hasLowerCase || !hasNumbers) {
+    return {
+      valid: false,
+      message: 'Passwort muss mindestens einen Großbuchstaben, einen Kleinbuchstaben und eine Zahl enthalten'
     }
   }
+
+  if (!hasSpecialChar) {
+    return {
+      valid: false,
+      message: 'Passwort muss mindestens ein Sonderzeichen enthalten (z.B. !@#$%^&*)'
+    }
+  }
+
+  return { valid: true }
 }
 
-// Initialize
-onMounted(async () => {
-  initializeForm()
-
-  // Load data
-  await Promise.all([
-    roomStore.fetchRooms(),
-    bookingStore.fetchBookings()
-  ])
-})
-
-// Watch for user changes
-watch(() => userStore.user, () => {
-  initializeForm()
-}, { deep: true })
-</script>

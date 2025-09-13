@@ -249,7 +249,7 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useUserStore } from '~/stores/userStore'
 
 // Meta für SEO
@@ -334,9 +334,10 @@ async function handleRegister() {
     return
   }
 
-  // Validate password length
-  if (registerForm.value.password.length < 8) {
-    errorMessage.value = 'Passwort muss mindestens 8 Zeichen lang sein'
+  // Passwort-Komplexität überprüfen
+  const validation = validatePassword(registerForm.value.password)
+  if (!validation.valid) {
+    errorMessage.value = validation.message
     return
   }
 
@@ -349,14 +350,49 @@ async function handleRegister() {
 
     successMessage.value = 'Registrierung erfolgreich! Sie können sich jetzt anmelden.'
 
-    // Switch to login form after successful registration
-    setTimeout(() => {
-      showRegister.value = false
-      loginForm.value.username = registerForm.value.username
-    }, 2000)
+    // Reset registration form after success
+    registerForm.value = {
+      username: '',
+      email: '',
+      password: '',
+      confirmPassword: ''
+    }
+
+    // Switch to login tab
+    activeTab.value = 'login'
   } catch (error) {
     errorMessage.value = error.message || 'Registrierung fehlgeschlagen'
   }
+}
+
+// Hilfsfunktion zur Validierung der Passwort-Komplexität
+function validatePassword(password) {
+  // Mindestens 8 Zeichen
+  if (password.length < 8) {
+    return { valid: false, message: 'Passwort muss mindestens 8 Zeichen lang sein' }
+  }
+
+  // Prüfung auf Komplexität
+  const hasUpperCase = /[A-Z]/.test(password)
+  const hasLowerCase = /[a-z]/.test(password)
+  const hasNumbers = /\d/.test(password)
+  const hasSpecialChar = /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]+/.test(password)
+
+  if (!hasUpperCase || !hasLowerCase || !hasNumbers) {
+    return {
+      valid: false,
+      message: 'Passwort muss mindestens einen Großbuchstaben, einen Kleinbuchstaben und eine Zahl enthalten'
+    }
+  }
+
+  if (!hasSpecialChar) {
+    return {
+      valid: false,
+      message: 'Passwort muss mindestens ein Sonderzeichen enthalten (z.B. !@#$%^&*)'
+    }
+  }
+
+  return { valid: true }
 }
 
 // Check if user is already logged in

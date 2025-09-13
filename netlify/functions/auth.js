@@ -306,6 +306,16 @@ exports.handler = async (event, context) => {
                 body: JSON.stringify({
                     message: 'User created successfully',
                     user: newUser
+
+            // Passwort-Komplexität überprüfen
+            const passwordValidation = validatePassword(password);
+            if (!passwordValidation.valid) {
+                return {
+                    statusCode: 400,
+                    headers,
+                    body: JSON.stringify({ error: passwordValidation.message })
+                };
+            }
                 })
             };
         }

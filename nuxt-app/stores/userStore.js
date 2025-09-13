@@ -62,10 +62,24 @@ export const useUserStore = defineStore('user', {
             this.isAuthenticated = true
 
             if (process.client) {
-                localStorage.setItem('auth_token', mockToken)
-                localStorage.setItem('session_token', this.sessionToken)
-                localStorage.setItem('user_data', JSON.stringify(user))
-                localStorage.setItem('mock_mode', 'true')
+                if (credentials.rememberMe) {
+                    localStorage.setItem('auth_token', mockToken)
+                    localStorage.setItem('session_token', this.sessionToken)
+                    localStorage.setItem('user_data', JSON.stringify(user))
+                    localStorage.setItem('mock_mode', 'true')
+                    sessionStorage.removeItem('auth_token')
+                    sessionStorage.removeItem('session_token')
+                    sessionStorage.removeItem('user_data')
+                } else {
+                    sessionStorage.setItem('auth_token', mockToken)
+                    sessionStorage.setItem('session_token', this.sessionToken)
+                    sessionStorage.setItem('user_data', JSON.stringify(user))
+                    sessionStorage.setItem('mock_mode', 'true')
+                    localStorage.removeItem('auth_token')
+                    localStorage.removeItem('session_token')
+                    localStorage.removeItem('user_data')
+                    localStorage.removeItem('mock_mode')
+                }
             }
 
             return { success: true, user }
@@ -93,61 +107,81 @@ export const useUserStore = defineStore('user', {
             this.isAuthenticated = true
 
             if (process.client) {
-                localStorage.setItem('auth_token', data.token)
-                localStorage.setItem('session_token', data.sessionToken)
-                localStorage.setItem('user_data', JSON.stringify(data.user))
-                localStorage.removeItem('mock_mode')
+                if (credentials.rememberMe) {
+                    localStorage.setItem('auth_token', data.token)
+                    localStorage.setItem('session_token', data.sessionToken)
+                    localStorage.setItem('user_data', JSON.stringify(data.user))
+                    localStorage.removeItem('mock_mode')
+                    sessionStorage.removeItem('auth_token')
+                    sessionStorage.removeItem('session_token')
+                    sessionStorage.removeItem('user_data')
+                } else {
+                    sessionStorage.setItem('auth_token', data.token)
+                    sessionStorage.setItem('session_token', data.sessionToken)
+                    sessionStorage.setItem('user_data', JSON.stringify(data.user))
+                    localStorage.removeItem('auth_token')
+                    localStorage.removeItem('session_token')
+                    localStorage.removeItem('user_data')
+                    localStorage.removeItem('mock_mode')
+                }
             }
 
             return { success: true, user: data.user }
         },
 
-        // Login action - automatische Auswahl zwischen Mock und Production
+        // Login-Dispatcher
         async login(credentials) {
             this.loading = true
             this.error = null
-
             try {
+                let result
                 if (this.isLocalDevelopment()) {
-                    return await this.mockLogin(credentials)
+                    result = await this.mockLogin(credentials)
                 } else {
-                    return await this.productionLogin(credentials)
+                    result = await this.productionLogin(credentials)
                 }
+                this.isAuthenticated = true
+                return result
             } catch (error) {
-                console.error('Login error:', error)
-                this.error = error.message
-                this.clearAuth()
+                this.isAuthenticated = false
+                this.user = null
+                this.token = null
+                this.sessionToken = null
                 throw error
             } finally {
                 this.loading = false
             }
         },
 
-        // Logout action
+        // Logout
         async logout() {
-            this.loading = true
-
-            try {
-                // Nur bei Production API logout-Request senden
-                if (!this.isLocalDevelopment() && this.token && !this.isMockMode()) {
-                    try {
-                        await fetch('/.netlify/functions/auth/logout', {
-                            method: 'POST',
-                            headers: {
-                                'Authorization': `Bearer ${this.token}`,
-                                'Content-Type': 'application/json'
-                            }
-                        })
-                    } catch (error) {
-                        console.warn('Server logout failed:', error)
-                    }
-                }
-            } finally {
-                this.clearAuth()
-                this.loading = false
-
-                if (process.client) {
-                    await navigateTo('/login')
+            this.user = null
+            this.token = null
+            this.sessionToken = null
+            this.isAuthenticated = false
+            this.error = null
+            if (process.client) {
+                localStorage.removeItem('auth_token')
+                localStorage.removeItem('session_token')
+                localStorage.removeItem('user_data')
+                localStorage.removeItem('mock_mode')
+                sessionStorage.removeItem('auth_token')
+                sessionStorage.removeItem('session_token')
+                sessionStorage.removeItem('user_data')
+                sessionStorage.removeItem('mock_mode')
+            }
+            // Nur bei Production API logout-Request senden
+            if (!this.isLocalDevelopment() && this.token && !this.isMockMode()) {
+                try {
+                    await fetch('/.netlify/functions/auth/logout', {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${this.token}`,
+                            'Content-Type': 'application/json'
+                        }
+                    })
+                } catch (error) {
+                    console.warn('Server logout failed:', error)
                 }
             }
         },
@@ -270,6 +304,10 @@ export const useUserStore = defineStore('user', {
                 localStorage.removeItem('session_token')
                 localStorage.removeItem('user_data')
                 localStorage.removeItem('mock_mode')
+                sessionStorage.removeItem('auth_token')
+                sessionStorage.removeItem('session_token')
+                sessionStorage.removeItem('user_data')
+                sessionStorage.removeItem('mock_mode')
             }
         },
 
