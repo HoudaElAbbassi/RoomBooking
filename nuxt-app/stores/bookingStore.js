@@ -324,13 +324,27 @@ export const useBookingStore = defineStore('booking', {
             try {
                 console.log('🗑️ Deleting booking:', bookingId, 'deleteRecurring:', deleteRecurring);
 
+                // Get authentication token
+                let authToken = null;
+                if (process.client) {
+                    // Try to get token from localStorage or sessionStorage
+                    authToken = localStorage.getItem('auth_token') || sessionStorage.getItem('auth_token');
+                    if (!authToken) {
+                        console.warn('⚠️ No authentication token found for booking deletion');
+                    }
+                }
+
                 const response = await fetch(`/.netlify/functions/bookings?id=${bookingId}&deleteRecurring=${deleteRecurring}`, {
-                    method: 'DELETE'
+                    method: 'DELETE',
+                    headers: {
+                        'Authorization': authToken ? `Bearer ${authToken}` : '',
+                        'Content-Type': 'application/json'
+                    }
                 });
 
-                if (!response.ok && response.status !== 404) {
+                if (!response.ok) {
                     const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
-                    throw new Error(errorData.error || 'Failed to delete booking');
+                    throw new Error(errorData.error || errorData.details || 'Failed to delete booking');
                 }
 
                 const result = await response.json();

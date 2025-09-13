@@ -508,6 +508,47 @@ exports.handler = async (event, context) => {
                 };
             }
 
+            // Authorization check - extract user info from token
+            const authHeader = event.headers.authorization;
+            let isAuthorized = false;
+            let userId = null;
+            let userRole = null;
+            let username = null;
+
+            if (authHeader) {
+                const token = authHeader.replace('Bearer ', '');
+                try {
+                    const jwt = require('jsonwebtoken');
+                    const jwtSecret = process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-in-production';
+                    const decoded = jwt.verify(token, jwtSecret);
+
+                    userId = decoded.userId;
+                    userRole = decoded.role;
+                    username = decoded.username;
+
+                    // User is authorized if they are an admin or the creator of the booking
+                    isAuthorized = userRole === 'admin' ||
+                                 existingBooking.rows[0].user_id === userId ||
+                                 existingBooking.rows[0].contact_name === username;
+
+                    console.log(`🔐 Authorization check: User ${username} (${userRole}) - Authorized: ${isAuthorized}`);
+                } catch (error) {
+                    console.warn('Token verification failed:', error.message);
+                }
+            }
+
+            // If not authorized, return 403 Forbidden
+            if (!isAuthorized) {
+                return {
+                    statusCode: 403,
+                    headers,
+                    body: JSON.stringify({
+                        error: 'Sie sind nicht berechtigt, diese Buchung zu löschen',
+                        details: 'Nur der Ersteller der Buchung oder ein Administrator kann diese Buchung löschen'
+                    })
+                };
+            }
+
             let deletedCount = 0;
 
             // Delete child bookings if this is a recurring parent and deleteRecurring is true
