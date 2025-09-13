@@ -5,9 +5,9 @@
       <div class="flex justify-between items-center">
         <!-- Logo & Title -->
         <div class="flex items-center">
-          <!-- Ersetze das Icon durch das Logo -->
+          <!-- Logo mit korrektem Pfad -->
           <img
-            src="/vest-logo-bearbeitet.png"
+            src="~/public/vest-logo-bearbeitet.png"
             alt="Logo"
             class="h-10 mr-3"
           />
