@@ -91,7 +91,7 @@
 
     <!-- Calendar Grid with Mobile Optimizations -->
     <div v-else>
-      <!-- Mobile List View (for very small screens in day mode) -->
+      <!-- Mobile Day View (List View) -->
       <div v-if="viewMode === 'day' && isMobileView" class="sm:hidden">
         <div class="border rounded-lg overflow-hidden">
           <!-- Time Slots as List Items -->
@@ -134,8 +134,94 @@
         </div>
       </div>
 
-      <!-- Traditional Grid Calendar -->
-      <div v-else class="calendar-container">
+      <!-- Mobile Week View (Simplified) -->
+      <div v-else-if="viewMode === 'week' && isMobileView" class="sm:hidden">
+        <!-- Day Tabs -->
+        <div class="mb-4">
+          <div class="flex overflow-x-auto -mx-4 px-4 pb-2">
+            <button
+              v-for="(day, index) in weekDays"
+              :key="day.date"
+              @click="selectedDayIndex = index"
+              class="min-w-[4rem] flex-shrink-0 px-4 py-2 mx-1 first:ml-0 rounded-md text-center transition-colors"
+              :class="selectedDayIndex === index
+                ? 'bg-blue-500 text-white'
+                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'"
+            >
+              <div class="font-medium">{{ day.name }}</div>
+              <div class="text-xs" :class="selectedDayIndex === index ? 'text-white' : 'text-gray-500'">
+                {{ formatDayNumber(day.date) }}
+              </div>
+            </button>
+          </div>
+        </div>
+
+        <!-- Selected Day Content -->
+        <div class="border rounded-lg overflow-hidden">
+          <div class="bg-gray-50 px-4 py-2 border-b flex justify-between items-center">
+            <h3 class="font-medium">{{ formatDayHeaderDate(weekDays[selectedDayIndex].date) }}</h3>
+            <div class="text-xs text-gray-500">
+              {{ getDayBookingCount(weekDays[selectedDayIndex].date) }} Buchungen
+            </div>
+          </div>
+
+          <div v-if="getDayBookingCount(weekDays[selectedDayIndex].date) === 0"
+               class="p-6 text-center text-gray-500">
+            <i class="fas fa-calendar-day text-gray-300 text-3xl mb-2"></i>
+            <p>Keine Buchungen für diesen Tag</p>
+          </div>
+
+          <!-- Day Schedule List -->
+          <div v-else class="divide-y">
+            <div
+              v-for="booking in getDayBookings(weekDays[selectedDayIndex].date)"
+              :key="booking.id"
+              class="p-3 hover:bg-gray-50 flex items-start gap-3 cursor-pointer"
+              @click="showBookingDetails(booking)"
+            >
+              <!-- Time Column -->
+              <div class="w-16 text-sm font-medium">
+                {{ getBookingStartTime(booking) }}
+              </div>
+
+              <!-- Booking Details -->
+              <div class="flex-1">
+                <div class="flex items-center gap-2">
+                  <div
+                    class="w-3 h-3 rounded-full flex-shrink-0"
+                    :class="getBookingColor(getBookingRoomId(booking))"
+                  ></div>
+                  <div class="font-medium">{{ booking.title }}</div>
+                </div>
+                <div class="text-sm text-gray-600 mt-1">
+                  {{ getRoomName(getBookingRoomId(booking)) }}
+                </div>
+                <div class="text-xs text-gray-500 mt-1">
+                  {{ formatBookingTime(booking) }}
+                </div>
+              </div>
+
+              <!-- Icons -->
+              <div class="text-xs text-gray-400">
+                <i v-if="booking.is_recurring" class="fas fa-repeat" title="Wiederkehrend"></i>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Quick Actions -->
+        <div class="mt-4 flex justify-center">
+          <button
+            @click="createBooking(weekDays[selectedDayIndex].date, '09:00')"
+            class="btn btn-primary btn-sm"
+          >
+            <i class="fas fa-plus mr-2"></i> Buchung erstellen
+          </button>
+        </div>
+      </div>
+
+      <!-- Traditional Grid Calendar for Desktop & Tablet -->
+      <div v-else class="calendar-container hidden sm:block">
         <!-- Header Row -->
         <div class="grid mb-2" :class="gridColsClass">
           <div class="px-2 py-3 text-center font-semibold text-sm text-gray-600 border-b">
@@ -289,6 +375,7 @@ const datePickerValue = ref(formatDate(new Date()))
 const showLegend = ref(false) // Collapsed by default on mobile
 const showTypes = ref(false) // Collapsed by default on mobile
 const isMobileView = ref(false) // Track if we're in mobile view
+const selectedDayIndex = ref(0) // For mobile week view tabs
 
 // Computed properties
 const rooms = computed(() => roomStore.rooms)
@@ -312,6 +399,25 @@ const gridColsClass = computed(() => {
     return isMobileView.value ? 'grid-cols-3' : 'grid-cols-8'
   }
   return 'grid-cols-2' // Day view (time + 1 day)
+})
+
+// Get week days for mobile tab view
+const weekDays = computed(() => {
+  const days = []
+  const dayNames = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So']
+  const monday = getMonday(new Date(currentDate.value))
+
+  for (let i = 0; i < 7; i++) {
+    const date = new Date(monday)
+    date.setDate(date.getDate() + i)
+
+    days.push({
+      name: dayNames[i],
+      date: formatDate(date)
+    })
+  }
+
+  return days
 })
 
 // Calculate display days based on view mode
@@ -352,8 +458,8 @@ const visibleBookings = computed(() => {
     return []
   }
 
-  const startDate = displayDays.value[0]?.date
-  const endDate = displayDays.value[displayDays.value.length - 1]?.date
+  const startDate = weekDays.value[0]?.date
+  const endDate = weekDays.value[weekDays.value.length - 1]?.date
 
   return bookings.value.filter(booking => {
     const bookingDate = getBookingDate(booking)
@@ -387,8 +493,8 @@ function formatNavigationDate() {
     return formatSelectedDate()
   } else {
     // For week view
-    const startDate = displayDays.value[0]?.date
-    const endDate = displayDays.value[displayDays.value.length - 1]?.date
+    const startDate = weekDays.value[0]?.date
+    const endDate = weekDays.value[weekDays.value.length - 1]?.date
     if (!startDate || !endDate) return ''
 
     const [startYear, startMonth, startDay] = startDate.split('-')
@@ -403,15 +509,45 @@ function formatNavigationDate() {
   }
 }
 
+function formatDayNumber(dateString) {
+  if (!dateString) return '';
+  const [year, month, day] = dateString.split('-')
+  return day
+}
+
+function formatDayHeaderDate(dateString) {
+  if (!dateString) return '';
+  const date = new Date(dateString)
+  return date.toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long' })
+}
+
+function getDayBookingCount(date) {
+  return visibleBookings.value.filter(booking => getBookingDate(booking) === date).length
+}
+
+function getDayBookings(date) {
+  return visibleBookings.value
+    .filter(booking => getBookingDate(booking) === date)
+    .sort((a, b) => {
+      const aTime = getBookingStartTime(a);
+      const bTime = getBookingStartTime(b);
+      return aTime.localeCompare(bTime);
+    });
+}
+
 function onDatePickerChange() {
   currentDate.value = new Date(datePickerValue.value)
   showDatePicker.value = false
+  // Reset selected day index when date changes
+  selectedDayIndex.value = 0
 }
 
 function goToToday() {
   currentDate.value = new Date()
   datePickerValue.value = formatDate(currentDate.value)
   showDatePicker.value = false
+  // Reset selected day index
+  selectedDayIndex.value = 0
 }
 
 function getListItemClass(date, timeSlot) {
@@ -431,7 +567,8 @@ function checkMobileView() {
     isMobileView.value = window.innerWidth < 640
     // Switch to day view automatically on small screens
     if (isMobileView.value && viewMode.value === 'week') {
-      viewMode.value = 'day'
+      // Keep week view but use tab interface
+      selectedDayIndex.value = 0
     }
   }
 }
@@ -464,6 +601,8 @@ function previousPeriod() {
   }
   currentDate.value = newDate
   datePickerValue.value = formatDate(newDate)
+  // Reset selected day index
+  selectedDayIndex.value = 0
 }
 
 function nextPeriod() {
@@ -475,6 +614,8 @@ function nextPeriod() {
   }
   currentDate.value = newDate
   datePickerValue.value = formatDate(newDate)
+  // Reset selected day index
+  selectedDayIndex.value = 0
 }
 
 // Enhanced data extraction helpers
@@ -719,10 +860,17 @@ watch(() => [rooms.value.length, bookings.value.length], ([newRooms, newBookings
 })
 
 watch(() => viewMode.value, () => {
-  // Wenn ein Benutzer auf mobiler Ansicht zur Wochenansicht wechselt
+  // Wenn ein Benutzer zur Wochenansicht wechselt
+  if (viewMode.value === 'week') {
+    // Reset selected day index
+    selectedDayIndex.value = 0
+  }
+})
+
+// Watch for selected day index changes
+watch(() => selectedDayIndex.value, (newIndex) => {
   if (viewMode.value === 'week' && isMobileView.value) {
-    // Zeige nur wenige Tage an statt die ganze Woche
-    console.log('Wochenansicht auf Mobilgerät aktiviert - kompakte Darstellung')
+    console.log(`Ausgewählter Tag in der Woche: ${weekDays.value[newIndex].name}, ${weekDays.value[newIndex].date}`)
   }
 })
 
