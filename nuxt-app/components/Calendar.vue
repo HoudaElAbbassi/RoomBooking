@@ -811,7 +811,27 @@ function showBookingDetails(booking) {
   const startTime = getBookingStartTime(booking)
   const endTime = getBookingEndTime(booking)
 
-  const details = `
+  const details = {
+    title: booking.title,
+    room: getRoomName(getBookingRoomId(booking)),
+    date: getBookingDate(booking),
+    time: `${startTime} - ${endTime}`,
+    contact: getBookingContactName(booking),
+    description: booking.description || '',
+    isRecurring: booking.is_recurring || false,
+    recurrenceType: booking.recurrence_type || '',
+    durationHours: booking.duration_hours || 1
+  }
+
+  // Elegante Toast-Nachricht statt Alert
+  if (process.client && window.$toast) {
+    window.$toast.info(`${details.title}`, {
+      title: `${details.room}, ${formatDisplayDate(details.date)}`,
+      duration: 8000,
+    });
+  } else {
+    // Fallback zum alten Alert, falls Toast nicht verfügbar
+    alert(`
 Buchung: ${booking.title}
 Raum: ${getRoomName(getBookingRoomId(booking))}
 Datum: ${getBookingDate(booking)}
@@ -820,9 +840,8 @@ Kontakt: ${getBookingContactName(booking)}
 ${booking.description ? '\nBeschreibung: ' + booking.description : ''}
 ${booking.is_recurring ? '\n🔄 Wiederkehrende Buchung (' + booking.recurrence_type + ')' : ''}
 ${booking.duration_hours ? '\nDauer: ' + booking.duration_hours + 'h' : ''}
-  `.trim()
-
-  alert(details)
+    `.trim())
+  }
 }
 
 function createBooking(date, timeSlot) {
