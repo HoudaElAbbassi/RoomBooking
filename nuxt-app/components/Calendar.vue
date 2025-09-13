@@ -1,40 +1,74 @@
-<!-- nuxt-app/components/Calendar.vue - Extended version with time ranges -->
+<!-- nuxt-app/components/Calendar.vue - Mobile optimized version -->
 <template>
-  <div class="bg-white rounded-lg shadow p-6">
-    <div class="flex items-center justify-between mb-6">
+  <div class="bg-white rounded-lg shadow p-4 sm:p-6">
+    <!-- Calendar Header with Responsive Design -->
+    <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-3">
       <h2 class="text-xl font-semibold">Buchungskalender</h2>
-      <div class="flex items-center gap-4">
+
+      <!-- Mobile Stats & View Toggle Row -->
+      <div class="flex w-full sm:w-auto justify-between sm:justify-end items-center gap-2 sm:gap-4">
         <!-- Stats Info -->
-        <div class="text-sm text-gray-500">
-          {{ visibleBookings.length }} Buchungen sichtbar
+        <div class="text-sm text-gray-500 hidden sm:block">
+          {{ visibleBookings.length }} Buchungen
         </div>
 
-        <!-- View Toggle -->
+        <!-- View Toggle - Always Visible -->
         <div class="flex border rounded-lg overflow-hidden">
-          <button
-              @click="viewMode = 'week'"
-              class="px-3 py-1 text-sm transition-colors"
-              :class="viewMode === 'week' ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'">
-            Woche
-          </button>
           <button
               @click="viewMode = 'day'"
               class="px-3 py-1 text-sm transition-colors"
               :class="viewMode === 'day' ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'">
             Tag
           </button>
+          <button
+              @click="viewMode = 'week'"
+              class="px-3 py-1 text-sm transition-colors"
+              :class="viewMode === 'week' ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'">
+            Woche
+          </button>
         </div>
 
-        <!-- Navigation -->
+        <!-- Date Selector (Mobile-friendly) -->
+        <button
+            @click="showDatePicker = !showDatePicker"
+            class="btn btn-outline btn-sm flex items-center"
+            aria-label="Datum auswählen">
+          <i class="fas fa-calendar-alt mr-1"></i>
+          <span class="hidden sm:inline">{{ formatSelectedDate() }}</span>
+          <span class="sm:hidden">{{ formatMobileDate() }}</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Date Navigation (Responsive) -->
+    <div class="flex items-center justify-between mb-4">
+      <button @click="previousPeriod" class="btn btn-outline btn-sm">
+        <i class="fas fa-chevron-left mr-1 sm:mr-2"></i>
+        <span class="hidden sm:inline">{{ viewMode === 'week' ? 'Vorherige Woche' : 'Vorheriger Tag' }}</span>
+      </button>
+
+      <div class="text-sm sm:text-base font-medium">
+        {{ formatNavigationDate() }}
+      </div>
+
+      <button @click="nextPeriod" class="btn btn-outline btn-sm">
+        <span class="hidden sm:inline">{{ viewMode === 'week' ? 'Nächste Woche' : 'Nächster Tag' }}</span>
+        <i class="fas fa-chevron-right ml-1 sm:ml-2"></i>
+      </button>
+    </div>
+
+    <!-- Date Picker (Mobile Optimized) -->
+    <div v-if="showDatePicker" class="mb-4 p-3 bg-gray-50 rounded-lg">
+      <div class="flex flex-col sm:flex-row gap-3 items-center">
+        <input
+          type="date"
+          v-model="datePickerValue"
+          class="w-full sm:w-auto px-3 py-2 border rounded"
+          @change="onDatePickerChange"
+        />
         <div class="flex gap-2">
-          <button @click="previousPeriod" class="btn btn-outline">
-            <i class="fas fa-chevron-left mr-1"></i>
-            {{ viewMode === 'week' ? 'Vorherige Woche' : 'Vorheriger Tag' }}
-          </button>
-          <button @click="nextPeriod" class="btn btn-outline">
-            {{ viewMode === 'week' ? 'Nächste Woche' : 'Nächster Tag' }}
-            <i class="fas fa-chevron-right ml-1"></i>
-          </button>
+          <button @click="goToToday" class="btn btn-sm btn-outline">Heute</button>
+          <button @click="showDatePicker = false" class="btn btn-sm btn-primary">Anwenden</button>
         </div>
       </div>
     </div>
@@ -55,85 +89,138 @@
       </button>
     </div>
 
-    <!-- Calendar Grid -->
-    <div v-else class="calendar-container">
-      <!-- Header Row -->
-      <div class="grid mb-2" :class="gridColsClass">
-        <div class="px-2 py-3 text-center font-semibold text-sm text-gray-600 border-b">
-          Uhrzeit
-        </div>
-        <div
-            v-for="day in displayDays"
-            :key="day.date"
-            class="px-2 py-3 text-center font-semibold text-sm text-gray-600 border-b"
-        >
-          <div>{{ day.name }}</div>
-          <div class="text-xs text-gray-500">{{ formatDisplayDate(day.date) }}</div>
+    <!-- Calendar Grid with Mobile Optimizations -->
+    <div v-else>
+      <!-- Mobile List View (for very small screens in day mode) -->
+      <div v-if="viewMode === 'day' && isMobileView" class="sm:hidden">
+        <div class="border rounded-lg overflow-hidden">
+          <!-- Time Slots as List Items -->
+          <div
+            v-for="slot in timeSlots"
+            :key="slot"
+            class="border-b last:border-b-0 relative"
+            :class="getListItemClass(displayDays[0].date, slot)"
+          >
+            <div class="flex items-center p-3">
+              <div class="w-16 font-medium text-gray-700">{{ slot }}</div>
+
+              <!-- Bookings for this slot -->
+              <div class="flex-1">
+                <div
+                  v-for="booking in getBookingsForSlot(displayDays[0].date, slot)"
+                  :key="booking.id"
+                  class="ml-2 p-2 rounded text-white text-sm mb-1 last:mb-0 cursor-pointer"
+                  :class="getBookingColor(getBookingRoomId(booking))"
+                  @click="showBookingDetails(booking)"
+                >
+                  <div class="font-medium">{{ booking.title }}</div>
+                  <div class="text-xs flex justify-between">
+                    <span>{{ getRoomName(getBookingRoomId(booking)) }}</span>
+                    <span>{{ formatBookingTime(booking) }}</span>
+                  </div>
+                </div>
+
+                <!-- Empty slot -->
+                <div
+                  v-if="getBookingsForSlot(displayDays[0].date, slot).length === 0"
+                  class="h-7 flex items-center ml-2 text-gray-400 text-sm"
+                  @click="createBooking(displayDays[0].date, slot)"
+                >
+                  <i class="fas fa-plus mr-2"></i> Buchen
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
-      <!-- Time Grid -->
-      <div class="grid border-l border-t" :class="gridColsClass">
-        <!-- Time Column -->
-        <div class="border-r">
+      <!-- Traditional Grid Calendar -->
+      <div v-else class="calendar-container">
+        <!-- Header Row -->
+        <div class="grid mb-2" :class="gridColsClass">
+          <div class="px-2 py-3 text-center font-semibold text-sm text-gray-600 border-b">
+            Uhrzeit
+          </div>
           <div
-              v-for="slot in timeSlots"
-              :key="slot"
-              class="h-16 px-2 py-1 border-b flex items-center justify-center text-sm text-gray-600"
+              v-for="day in displayDays"
+              :key="day.date"
+              class="px-2 py-3 text-center font-semibold text-sm text-gray-600 border-b"
           >
-            {{ slot }}
+            <div>{{ day.name }}</div>
+            <div class="text-xs text-gray-500">{{ formatDisplayDate(day.date) }}</div>
           </div>
         </div>
 
-        <!-- Day Columns -->
-        <div
-            v-for="day in displayDays"
-            :key="day.date"
-            class="border-r last:border-r-0"
-        >
-          <div
-              v-for="slot in timeSlots"
-              :key="`${day.date}-${slot}`"
-              class="h-16 px-1 py-1 border-b relative bg-gray-50 hover:bg-gray-100"
-              :class="getDayCellClass(day.date, slot)"
-          >
-            <!-- Extended Booking Display -->
+        <!-- Time Grid -->
+        <div class="grid border-l border-t" :class="gridColsClass">
+          <!-- Time Column -->
+          <div class="border-r">
             <div
-                v-for="booking in getBookingsForSlot(day.date, slot)"
-                :key="booking.id"
-                class="absolute rounded p-1 overflow-hidden text-white text-xs cursor-pointer transition-all hover:shadow-lg z-10"
-                :class="[getBookingColor(getBookingRoomId(booking)), getBookingDimensionClass(booking, slot)]"
-                :style="getBookingPositionStyle(booking, slot)"
-                @click="showBookingDetails(booking)"
-                :title="getBookingTooltip(booking)"
+                v-for="slot in timeSlots"
+                :key="slot"
+                class="h-14 sm:h-16 px-2 py-1 border-b flex items-center justify-center text-xs sm:text-sm text-gray-600"
             >
-              <div class="font-semibold truncate">{{ booking.title }}</div>
-              <div class="truncate opacity-90 text-xs">{{ getRoomName(getBookingRoomId(booking)) }}</div>
-              <div class="truncate text-xs opacity-75">{{ getBookingContactName(booking) }}</div>
-              <div v-if="booking.is_recurring" class="absolute top-0 right-0 text-xs">
-                <i class="fas fa-repeat" title="Wiederkehrend"></i>
-              </div>
-              <!-- Duration indicator for multi-slot bookings -->
-              <div v-if="getBookingDurationSlots(booking) > 1" class="text-xs opacity-90 mt-1">
-                {{ formatBookingTime(booking) }}
-              </div>
+              {{ slot }}
             </div>
+          </div>
 
-            <!-- Empty Slot Indicator -->
-            <div v-if="getBookingsForSlot(day.date, slot).length === 0"
-                 class="absolute inset-0 flex items-center justify-center text-gray-400">
-              <i class="fas fa-plus text-xs opacity-0 hover:opacity-50 transition-opacity"
-                 @click="createBooking(day.date, slot)"></i>
+          <!-- Day Columns -->
+          <div
+              v-for="day in displayDays"
+              :key="day.date"
+              class="border-r last:border-r-0"
+          >
+            <div
+                v-for="slot in timeSlots"
+                :key="`${day.date}-${slot}`"
+                class="h-14 sm:h-16 px-1 py-1 border-b relative bg-gray-50 hover:bg-gray-100"
+                :class="getDayCellClass(day.date, slot)"
+                @click="createBooking(day.date, slot)"
+            >
+              <!-- Extended Booking Display -->
+              <div
+                  v-for="booking in getBookingsForSlot(day.date, slot)"
+                  :key="booking.id"
+                  class="absolute rounded p-1 overflow-hidden text-white text-xs cursor-pointer transition-all hover:shadow-lg z-10"
+                  :class="[getBookingColor(getBookingRoomId(booking)), getBookingDimensionClass(booking, slot)]"
+                  :style="getBookingPositionStyle(booking, slot)"
+                  @click.stop="showBookingDetails(booking)"
+                  :title="getBookingTooltip(booking)"
+              >
+                <div class="font-semibold truncate">{{ booking.title }}</div>
+                <div class="truncate opacity-90 text-xs hidden sm:block">{{ getRoomName(getBookingRoomId(booking)) }}</div>
+                <div class="truncate text-xs opacity-75 hidden sm:block">{{ getBookingContactName(booking) }}</div>
+                <div v-if="booking.is_recurring" class="absolute top-0 right-0 text-xs">
+                  <i class="fas fa-repeat" title="Wiederkehrend"></i>
+                </div>
+                <!-- Duration indicator for multi-slot bookings -->
+                <div v-if="getBookingDurationSlots(booking) > 1" class="text-xs opacity-90 mt-1">
+                  {{ formatBookingTime(booking) }}
+                </div>
+              </div>
+
+              <!-- Empty Slot Indicator -->
+              <div v-if="getBookingsForSlot(day.date, slot).length === 0"
+                   class="absolute inset-0 flex items-center justify-center text-gray-400">
+                <i class="fas fa-plus text-xs opacity-0 hover:opacity-50 transition-opacity"></i>
+              </div>
             </div>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- Room Legend -->
-    <div class="mt-6 pt-4 border-t">
-      <h3 class="text-sm font-semibold mb-3">Räume-Legende:</h3>
-      <div class="flex flex-wrap gap-3">
+    <!-- Room Legend (Collapsible on Mobile) -->
+    <div class="mt-4 pt-4 border-t">
+      <button
+        @click="showLegend = !showLegend"
+        class="flex items-center justify-between w-full text-left text-sm font-semibold mb-2"
+      >
+        <span>Räume-Legende:</span>
+        <i class="fas" :class="showLegend ? 'fa-chevron-up' : 'fa-chevron-down'"></i>
+      </button>
+
+      <div v-if="showLegend" class="flex flex-wrap gap-3">
         <div
             v-for="room in rooms"
             :key="room.id"
@@ -149,10 +236,17 @@
       </div>
     </div>
 
-    <!-- Booking Type Legend -->
-    <div class="mt-4 pt-4 border-t">
-      <h3 class="text-sm font-semibold mb-3">Buchungstypen:</h3>
-      <div class="flex flex-wrap gap-4 text-sm">
+    <!-- Booking Type Legend (Collapsible on Mobile) -->
+    <div class="mt-3 pt-3 border-t">
+      <button
+        @click="showTypes = !showTypes"
+        class="flex items-center justify-between w-full text-left text-sm font-semibold mb-2"
+      >
+        <span>Buchungstypen:</span>
+        <i class="fas" :class="showTypes ? 'fa-chevron-up' : 'fa-chevron-down'"></i>
+      </button>
+
+      <div v-if="showTypes" class="flex flex-wrap gap-4 text-sm">
         <div class="flex items-center">
           <i class="fas fa-calendar text-blue-500 mr-2"></i>
           <span>Einzeltermin</span>
@@ -189,7 +283,12 @@ const bookingStore = useBookingStore()
 
 // Reactive data
 const currentDate = ref(new Date())
-const viewMode = ref('week') // 'week' or 'day'
+const viewMode = ref('day') // Default to 'day' view for mobile
+const showDatePicker = ref(false)
+const datePickerValue = ref(formatDate(new Date()))
+const showLegend = ref(false) // Collapsed by default on mobile
+const showTypes = ref(false) // Collapsed by default on mobile
+const isMobileView = ref(false) // Track if we're in mobile view
 
 // Computed properties
 const rooms = computed(() => roomStore.rooms)
@@ -207,7 +306,12 @@ const timeSlots = [
 ]
 
 const gridColsClass = computed(() => {
-  return viewMode.value === 'week' ? 'grid-cols-8' : 'grid-cols-2'
+  // Use a smaller grid for mobile week view
+  if (viewMode.value === 'week') {
+    // On mobile, show only 3 columns (time + 2 days) by default
+    return isMobileView.value ? 'grid-cols-3' : 'grid-cols-8'
+  }
+  return 'grid-cols-2' // Day view (time + 1 day)
 })
 
 // Calculate display days based on view mode
@@ -226,7 +330,10 @@ const displayDays = computed(() => {
   const dayNames = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So']
   const monday = getMonday(new Date(currentDate.value))
 
-  for (let i = 0; i < 7; i++) {
+  // For mobile, only show current day + next day in week view
+  const daysToShow = isMobileView.value ? 2 : 7
+
+  for (let i = 0; i < daysToShow; i++) {
     const date = new Date(monday)
     date.setDate(date.getDate() + i)
 
@@ -264,6 +371,71 @@ const visibleBookings = computed(() => {
   })
 })
 
+// Mobile-specific methods
+function formatSelectedDate() {
+  const options = { weekday: 'short', year: 'numeric', month: 'long', day: 'numeric' }
+  return new Date(currentDate.value).toLocaleDateString('de-DE', options)
+}
+
+function formatMobileDate() {
+  const options = { day: '2-digit', month: '2-digit' }
+  return new Date(currentDate.value).toLocaleDateString('de-DE', options)
+}
+
+function formatNavigationDate() {
+  if (viewMode.value === 'day') {
+    return formatSelectedDate()
+  } else {
+    // For week view
+    const startDate = displayDays.value[0]?.date
+    const endDate = displayDays.value[displayDays.value.length - 1]?.date
+    if (!startDate || !endDate) return ''
+
+    const [startYear, startMonth, startDay] = startDate.split('-')
+    const [endYear, endMonth, endDay] = endDate.split('-')
+
+    // Simplified display for mobile
+    if (isMobileView.value) {
+      return `${startDay}.${startMonth} - ${endDay}.${endMonth}`
+    }
+
+    return `${startDay}.${startMonth}.${startYear} - ${endDay}.${endMonth}.${endYear}`
+  }
+}
+
+function onDatePickerChange() {
+  currentDate.value = new Date(datePickerValue.value)
+  showDatePicker.value = false
+}
+
+function goToToday() {
+  currentDate.value = new Date()
+  datePickerValue.value = formatDate(currentDate.value)
+  showDatePicker.value = false
+}
+
+function getListItemClass(date, timeSlot) {
+  const isToday = date === new Date().toISOString().split('T')[0]
+  const currentTime = new Date().toTimeString().slice(0, 5)
+  const isPast = isToday && timeSlot < currentTime
+
+  return {
+    'bg-blue-50': isToday && !isPast,
+    'bg-gray-100': isPast
+  }
+}
+
+// Detect mobile view
+function checkMobileView() {
+  if (process.client) {
+    isMobileView.value = window.innerWidth < 640
+    // Switch to day view automatically on small screens
+    if (isMobileView.value && viewMode.value === 'week') {
+      viewMode.value = 'day'
+    }
+  }
+}
+
 // Helper functions
 function getMonday(date) {
   const day = date.getDay()
@@ -291,6 +463,7 @@ function previousPeriod() {
     newDate.setDate(newDate.getDate() - 1)
   }
   currentDate.value = newDate
+  datePickerValue.value = formatDate(newDate)
 }
 
 function nextPeriod() {
@@ -301,6 +474,7 @@ function nextPeriod() {
     newDate.setDate(newDate.getDate() + 1)
   }
   currentDate.value = newDate
+  datePickerValue.value = formatDate(newDate)
 }
 
 // Enhanced data extraction helpers
@@ -545,14 +719,25 @@ watch(() => [rooms.value.length, bookings.value.length], ([newRooms, newBookings
 })
 
 watch(() => viewMode.value, () => {
-  // Reset to current week/day when switching view modes
-  currentDate.value = new Date()
+  // Wenn ein Benutzer auf mobiler Ansicht zur Wochenansicht wechselt
+  if (viewMode.value === 'week' && isMobileView.value) {
+    // Zeige nur wenige Tage an statt die ganze Woche
+    console.log('Wochenansicht auf Mobilgerät aktiviert - kompakte Darstellung')
+  }
 })
 
 onMounted(async () => {
-  console.log('📅 Extended Calendar mounted - loading data...')
+  console.log('📅 Mobile-optimized Calendar mounted - loading data...')
 
   try {
+    // Check if we're on mobile
+    checkMobileView()
+
+    // Add resize listener for responsive behavior
+    if (process.client) {
+      window.addEventListener('resize', checkMobileView)
+    }
+
     if (rooms.value.length === 0) {
       console.log('🏠 Loading rooms...')
       await roomStore.fetchRooms()
@@ -564,10 +749,17 @@ onMounted(async () => {
     }
 
     await nextTick()
-    console.log(`✅ Extended Calendar ready: ${rooms.value.length} rooms, ${bookings.value.length} bookings`)
+    console.log(`✅ Mobile-optimized Calendar ready: ${rooms.value.length} rooms, ${bookings.value.length} bookings`)
 
   } catch (error) {
     console.error('❌ Error loading calendar data:', error)
+  }
+})
+
+// Clean up event listeners
+onUnmounted(() => {
+  if (process.client) {
+    window.removeEventListener('resize', checkMobileView)
   }
 })
 </script>
@@ -575,10 +767,17 @@ onMounted(async () => {
 <style scoped>
 .calendar-container {
   overflow-x: auto;
+  -webkit-overflow-scrolling: touch; /* Smooth scrolling on iOS */
+  scroll-behavior: smooth;
+  max-width: 100%;
 }
 
 .btn {
-  @apply px-4 py-2 rounded transition-colors;
+  @apply px-3 py-1.5 rounded transition-colors;
+}
+
+.btn-sm {
+  @apply px-2 py-1 text-sm;
 }
 
 .btn-primary {
@@ -590,12 +789,19 @@ onMounted(async () => {
 }
 
 /* Enhanced responsive adjustments */
-@media (max-width: 768px) {
-  .grid-cols-8 {
-    min-width: 640px;
+@media (max-width: 639px) {
+  .grid-cols-3 {
+    min-width: 480px;
   }
   .grid-cols-2 {
     min-width: 320px;
+  }
+}
+
+/* For wider mobile screens */
+@media (min-width: 480px) and (max-width: 639px) {
+  .grid-cols-3 {
+    grid-template-columns: auto repeat(2, minmax(150px, 1fr));
   }
 }
 
@@ -623,5 +829,17 @@ onMounted(async () => {
   right: 2px;
   font-size: 10px;
   opacity: 0.8;
+}
+
+/* Touch-friendly targets for mobile */
+@media (max-width: 639px) {
+  .booking-item {
+    min-height: 32px;
+  }
+
+  .btn {
+    min-height: 36px;
+    min-width: 36px;
+  }
 }
 </style>
