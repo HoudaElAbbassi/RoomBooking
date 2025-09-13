@@ -7,7 +7,7 @@
         <div class="flex items-center">
           <!-- Logo mit korrektem Pfad -->
           <img
-            src="~/public/vest-logo-bearbeitet.png"
+            src="./public/vest-logo - bearbeitet.png"
             alt="Logo"
             class="h-10 mr-3"
           />
