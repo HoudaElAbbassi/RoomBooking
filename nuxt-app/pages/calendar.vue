@@ -45,6 +45,9 @@
         <Calendar :filter-room-ids="selectedRoomIds" />
       </div>
     </div>
+
+    <!-- Buchungsmodal hinzufügen -->
+    <BookingModal ref="bookingModalRef" />
   </div>
 </template>
 
@@ -52,6 +55,7 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import { useRoomStore } from '../stores/roomStore'
 import Calendar from '../components/Calendar.vue'
+import BookingModal from '../components/BookingModal.vue'
 
 // Middleware für Authentication
 definePageMeta({
@@ -60,6 +64,9 @@ definePageMeta({
 
 const roomStore = useRoomStore()
 const rooms = computed(() => roomStore.rooms)
+
+// Referenz zum Buchungsmodal
+const bookingModalRef = ref(null)
 
 // Raumfilter
 const selectedRoomIds = ref([])
@@ -89,5 +96,14 @@ watch(selectedRoomIds, (newValue) => {
 onMounted(async () => {
   await roomStore.fetchRooms()
   initializeRoomFilter()
+
+  // Event-Listener für openBookingModal-Event registrieren
+  if (process.client) {
+    window.addEventListener('openBookingModal', (event) => {
+      if (bookingModalRef.value) {
+        bookingModalRef.value.openModal(event.detail)
+      }
+    })
+  }
 })
 </script>
