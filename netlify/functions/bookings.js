@@ -1,34 +1,17 @@
-// netlify/functions/bookings.js - Fixed version with proper time formatting
+// netlify/functions/bookings.js - Extended version with time ranges and recurring bookings
 const { Pool } = require('pg');
 
 // Environment Variable Validation
 function validateEnvironment() {
     const dbUrl = process.env.DATABASE_URL;
 
-    console.log('🔍 Environment Validation:');
-    console.log('- DATABASE_URL exists:', !!dbUrl);
-    console.log('- Deploy Context:', process.env.CONTEXT || 'unknown');
-    console.log('- Deploy ID:', process.env.DEPLOY_ID || 'unknown');
-
     if (!dbUrl) {
-        console.error('❌ DATABASE_URL not found in environment');
-        console.log('Available env vars:', Object.keys(process.env).filter(k =>
-            k.toLowerCase().includes('database') || k.toLowerCase().includes('neon')
-        ));
         throw new Error('DATABASE_URL environment variable not configured');
-    }
-
-    if (dbUrl.includes('localhost') || dbUrl.includes('127.0.0.1')) {
-        throw new Error('DATABASE_URL points to localhost - should point to Neon');
     }
 
     if (!dbUrl.startsWith('postgresql://')) {
         throw new Error('DATABASE_URL must start with postgresql://');
     }
-
-    console.log('✅ Environment validation passed');
-    console.log('- URL prefix:', dbUrl.substring(0, 25) + '...');
-    console.log('- Contains neon.tech:', dbUrl.includes('neon.tech'));
 
     return dbUrl;
 }
@@ -37,19 +20,16 @@ function validateEnvironment() {
 function formatTimeSlot(timeValue) {
     if (!timeValue) return null;
 
-    // If it's already a string in HH:MM format
     if (typeof timeValue === 'string' && timeValue.match(/^\d{2}:\d{2}$/)) {
         return timeValue;
     }
 
-    // If it's a time object from PostgreSQL
     if (typeof timeValue === 'object' && timeValue !== null) {
         const hours = String(timeValue.hours || timeValue.hour || 0).padStart(2, '0');
         const minutes = String(timeValue.minutes || timeValue.minute || 0).padStart(2, '0');
         return `${hours}:${minutes}`;
     }
 
-    // If it's a string that needs formatting
     if (typeof timeValue === 'string') {
         const match = timeValue.match(/(\d{1,2}):?(\d{2})?/);
         if (match) {
@@ -73,14 +53,60 @@ function formatDate(dateValue) {
     return String(dateValue);
 }
 
+// Helper function to generate recurring dates
+function generateRecurringDates(startDate, recurrenceType, endDate) {
+    const dates = [];
+    const current = new Date(startDate + 'T00:00:00');
+    const end = new Date(endDate + 'T00:00:00');
+
+    while (current <= end) {
+        dates.push(current.toISOString().split('T')[0]);
+
+        switch (recurrenceType) {
+            case 'daily':
+                current.setDate(current.getDate() + 1);
+                break;
+            case 'weekly':
+                current.setDate(current.getDate() + 7);
+                break;
+            case 'monthly':
+                current.setMonth(current.getMonth() + 1);
+                break;
+            default:
+                return dates; // Stop if unknown type
+        }
+    }
+
+    return dates;
+}
+
+// Helper function to check for booking conflicts
+async function checkBookingConflicts(client, roomId, date, startTime, endTime, excludeId = null) {
+    const query = `
+        SELECT id, title, start_time, end_time 
+        FROM bookings 
+        WHERE room_id = $1 
+        AND booking_date = $2 
+        AND ($3 < end_time AND $4 > start_time)
+        ${excludeId ? 'AND id != $5' : ''}
+    `;
+
+    const params = [roomId, date, startTime, endTime];
+    if (excludeId) params.push(excludeId);
+
+    const result = await client.query(query, params);
+    return result.rows;
+}
+
 exports.handler = async (event, context) => {
     const headers = {
         'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+        'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
         'Content-Type': 'application/json'
     };
 
-    // Log request info
-    console.log(`📡 ${event.httpMethod} ${event.path} - Deploy: ${process.env.DEPLOY_ID || 'unknown'}`);
+    console.log(`📡 ${event.httpMethod} ${event.path} - Extended Booking Handler`);
 
     if (event.httpMethod === 'OPTIONS') {
         return { statusCode: 200, headers };
@@ -97,20 +123,18 @@ exports.handler = async (event, context) => {
             body: JSON.stringify({
                 error: 'Configuration error',
                 details: error.message,
-                timestamp: new Date().toISOString(),
-                deployId: process.env.DEPLOY_ID || 'unknown'
+                timestamp: new Date().toISOString()
             })
         };
     }
 
-    // Database pool configuration
     const pool = new Pool({
         connectionString: dbUrl,
         ssl: {
             rejectUnauthorized: false,
             require: true
         },
-        max: 1, // Important for serverless
+        max: 1,
         min: 0,
         acquireTimeoutMillis: 60000,
         createTimeoutMillis: 30000,
@@ -123,37 +147,37 @@ exports.handler = async (event, context) => {
 
     try {
         console.log('🔄 Acquiring database connection...');
+        client = await pool.connect();
+        console.log(`✅ Database connected in ${Date.now() - startTime}ms`);
 
-        // Connection with timeout
-        const connectPromise = pool.connect();
-        const timeoutPromise = new Promise((_, reject) =>
-            setTimeout(() => reject(new Error('Connection timeout')), 15000)
-        );
-
-        client = await Promise.race([connectPromise, timeoutPromise]);
-        const connectionTime = Date.now() - startTime;
-
-        console.log(`✅ Database connected in ${connectionTime}ms`);
-
-        // Verify database is responding
-        await client.query('SELECT 1');
-        console.log('✅ Database responding to queries');
-
+        // GET - Fetch bookings with extended information
         if (event.httpMethod === 'GET') {
-            const { roomId, date, startDate, endDate } = event.queryStringParameters || {};
+            const { roomId, date, startDate, endDate, includeRecurring = 'true' } = event.queryStringParameters || {};
 
             let query = `
-                SELECT
-                    b.id,
-                    b.room_id,
-                    b.title,
-                    b.description,
-                    b.contact_name,
-                    b.booking_date,
-                    b.time_slot,
-                    b.created_at
-                FROM bookings b
+                SELECT 
+                  b.id, 
+                  b.room_id, 
+                  b.title, 
+                  b.description, 
+                  b.contact_name, 
+                  b.booking_date, 
+                  COALESCE(b.start_time, b.time_slot) as start_time,
+                  COALESCE(b.end_time, (b.time_slot::time + interval '1 hour')::time) as end_time,
+                  b.is_recurring,
+                  b.recurrence_type,
+                  b.recurrence_end_date,
+                  b.parent_booking_id,
+                  b.created_at,
+                  CASE 
+                    WHEN b.parent_booking_id IS NOT NULL THEN 'child'
+                    WHEN b.is_recurring = true THEN 'parent'
+                    ELSE 'single'
+                  END as booking_type,
+                  EXTRACT(EPOCH FROM (COALESCE(b.end_time, (b.time_slot::time + interval '1 hour')::time) - COALESCE(b.start_time, b.time_slot)))/3600 AS duration_hours
+                FROM bookings b 
             `;
+
             const params = [];
             const conditions = [];
 
@@ -172,11 +196,16 @@ exports.handler = async (event, context) => {
                 params.push(startDate, endDate);
             }
 
+            // Option to exclude child bookings from recurring series
+            if (includeRecurring === 'false') {
+                conditions.push(`b.parent_booking_id IS NULL`);
+            }
+
             if (conditions.length > 0) {
                 query += ' WHERE ' + conditions.join(' AND ');
             }
 
-            query += ' ORDER BY b.booking_date, b.time_slot';
+            query += ' ORDER BY b.booking_date, COALESCE(b.start_time, b.time_slot)';
 
             console.log(`📊 Executing query with ${params.length} parameters`);
             const result = await client.query(query, params);
@@ -190,11 +219,18 @@ exports.handler = async (event, context) => {
                 description: row.description,
                 contact_name: row.contact_name,
                 booking_date: formatDate(row.booking_date),
-                time_slot: formatTimeSlot(row.time_slot),
-                created_at: row.created_at
+                start_time: formatTimeSlot(row.start_time),
+                end_time: formatTimeSlot(row.end_time),
+                is_recurring: row.is_recurring,
+                recurrence_type: row.recurrence_type,
+                recurrence_end_date: row.recurrence_end_date,
+                parent_booking_id: row.parent_booking_id,
+                booking_type: row.booking_type,
+                duration_hours: parseFloat(row.duration_hours || 1),
+                created_at: row.created_at,
+                // Backward compatibility
+                time_slot: formatTimeSlot(row.start_time)
             }));
-
-            console.log('📤 Sample formatted result:', formattedResults[0] || 'No results');
 
             return {
                 statusCode: 200,
@@ -203,78 +239,303 @@ exports.handler = async (event, context) => {
             };
         }
 
+        // POST - Create new booking (single or recurring)
         if (event.httpMethod === 'POST') {
-            const { roomId, title, description, contactName, date, timeSlot } = JSON.parse(event.body);
+            const {
+                roomId, title, description, contactName, date,
+                startTime, endTime, timeSlot,
+                isRecurring = false, recurrenceType, recurrenceEndDate
+            } = JSON.parse(event.body);
 
-            console.log(`📝 Creating booking: Room ${roomId}, ${date} ${timeSlot}`);
+            console.log(`📝 Creating booking: Room ${roomId}, ${date} ${startTime || timeSlot}-${endTime || 'N/A'}`);
 
             // Validation
-            if (!roomId || !title || !contactName || !date || !timeSlot) {
+            if (!roomId || !title || !contactName || !date) {
                 return {
                     statusCode: 400,
                     headers,
                     body: JSON.stringify({
                         error: 'Fehlende Pflichtfelder',
-                        required: ['roomId', 'title', 'contactName', 'date', 'timeSlot']
+                        required: ['roomId', 'title', 'contactName', 'date']
                     })
                 };
             }
 
-            // Format input data
-            const formattedTimeSlot = formatTimeSlot(timeSlot);
+            // Handle backward compatibility with old timeSlot format
+            const formattedStartTime = formatTimeSlot(startTime || timeSlot);
+            const formattedEndTime = formatTimeSlot(endTime ||
+                (timeSlot ? addHourToTime(timeSlot) : addHourToTime(startTime)));
             const formattedDate = formatDate(date);
 
-            console.log(`📝 Formatted input: ${formattedDate} ${formattedTimeSlot}`);
-
-            // Check for existing booking
-            const existingBooking = await client.query(
-                'SELECT id FROM bookings WHERE room_id = $1 AND booking_date = $2 AND time_slot = $3',
-                [parseInt(roomId), formattedDate, formattedTimeSlot]
-            );
-
-            if (existingBooking.rows.length > 0) {
-                console.log('⚠️ Time slot already booked');
+            // Validate time range
+            if (formattedStartTime >= formattedEndTime) {
                 return {
-                    statusCode: 409,
+                    statusCode: 400,
                     headers,
-                    body: JSON.stringify({ error: 'Dieser Zeitslot ist bereits belegt' })
+                    body: JSON.stringify({
+                        error: 'Endzeit muss nach der Startzeit liegen'
+                    })
                 };
             }
 
-            // Create booking
-            const result = await client.query(
-                `INSERT INTO bookings (room_id, title, description, contact_name, booking_date, time_slot) 
-                 VALUES ($1, $2, $3, $4, $5, $6) 
-                 RETURNING 
-                   id, 
-                   room_id, 
-                   title, 
-                   description, 
-                   contact_name, 
-                   booking_date, 
-                   time_slot,
-                   created_at`,
-                [parseInt(roomId), title, description || '', contactName, formattedDate, formattedTimeSlot]
+            console.log(`📝 Formatted times: ${formattedDate} ${formattedStartTime}-${formattedEndTime}`);
+
+            // Check for conflicts on main date
+            const conflicts = await checkBookingConflicts(
+                client, parseInt(roomId), formattedDate, formattedStartTime, formattedEndTime
             );
 
-            console.log(`✅ Booking created with ID ${result.rows[0].id}`);
+            if (conflicts.length > 0) {
+                console.log('⚠️ Time slot conflicts detected');
+                return {
+                    statusCode: 409,
+                    headers,
+                    body: JSON.stringify({
+                        error: 'Zeitkonflikt mit bestehender Buchung',
+                        conflicts: conflicts.map(c => ({
+                            id: c.id,
+                            title: c.title,
+                            time: `${formatTimeSlot(c.start_time)} - ${formatTimeSlot(c.end_time)}`
+                        }))
+                    })
+                };
+            }
 
-            // Format the response consistently
-            const newBooking = {
-                id: result.rows[0].id,
-                room_id: result.rows[0].room_id,
-                title: result.rows[0].title,
-                description: result.rows[0].description,
-                contact_name: result.rows[0].contact_name,
-                booking_date: formatDate(result.rows[0].booking_date),
-                time_slot: formatTimeSlot(result.rows[0].time_slot),
-                created_at: result.rows[0].created_at
+            // Create main booking
+            const mainBookingResult = await client.query(
+                `INSERT INTO bookings (
+                    room_id, title, description, contact_name, booking_date, 
+                    start_time, end_time, is_recurring, recurrence_type, recurrence_end_date
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) 
+                RETURNING 
+                   id, room_id, title, description, contact_name, booking_date, 
+                   start_time, end_time, is_recurring, recurrence_type, 
+                   recurrence_end_date, created_at`,
+                [
+                    parseInt(roomId), title, description || '', contactName,
+                    formattedDate, formattedStartTime, formattedEndTime,
+                    isRecurring, isRecurring ? recurrenceType : null,
+                    isRecurring ? recurrenceEndDate : null
+                ]
+            );
+
+            const mainBooking = mainBookingResult.rows[0];
+            console.log(`✅ Main booking created with ID ${mainBooking.id}`);
+
+            let recurringBookings = [];
+            let conflictCount = 0;
+
+            // Create recurring bookings if specified
+            if (isRecurring && recurrenceType && recurrenceEndDate) {
+                console.log(`🔄 Creating recurring bookings: ${recurrenceType} until ${recurrenceEndDate}`);
+
+                const recurringDates = generateRecurringDates(formattedDate, recurrenceType, recurrenceEndDate);
+                console.log(`📅 Generated ${recurringDates.length} recurring dates`);
+
+                // Skip the first date (already created as main booking)
+                for (const recurringDate of recurringDates.slice(1)) {
+                    try {
+                        // Check for conflicts
+                        const dateConflicts = await checkBookingConflicts(
+                            client, parseInt(roomId), recurringDate, formattedStartTime, formattedEndTime
+                        );
+
+                        if (dateConflicts.length > 0) {
+                            console.log(`⚠️ Skipping ${recurringDate} due to conflicts`);
+                            conflictCount++;
+                            continue;
+                        }
+
+                        // Create recurring booking
+                        const recurringResult = await client.query(
+                            `INSERT INTO bookings (
+                                room_id, title, description, contact_name, booking_date,
+                                start_time, end_time, is_recurring, parent_booking_id
+                            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) 
+                            RETURNING id, booking_date`,
+                            [
+                                parseInt(roomId), title, description || '', contactName,
+                                recurringDate, formattedStartTime, formattedEndTime, false, mainBooking.id
+                            ]
+                        );
+
+                        recurringBookings.push(recurringResult.rows[0]);
+                    } catch (error) {
+                        console.warn(`⚠️ Failed to create recurring booking for ${recurringDate}:`, error.message);
+                        conflictCount++;
+                    }
+                }
+
+                console.log(`✅ Created ${recurringBookings.length} recurring bookings, ${conflictCount} skipped due to conflicts`);
+            }
+
+            // Format response
+            const response = {
+                ...mainBooking,
+                booking_date: formatDate(mainBooking.booking_date),
+                start_time: formatTimeSlot(mainBooking.start_time),
+                end_time: formatTimeSlot(mainBooking.end_time),
+                // Backward compatibility
+                time_slot: formatTimeSlot(mainBooking.start_time),
+                // Additional info
+                recurring_created: recurringBookings.length,
+                recurring_conflicts: conflictCount,
+                total_bookings: 1 + recurringBookings.length
             };
 
             return {
                 statusCode: 201,
                 headers,
-                body: JSON.stringify(newBooking)
+                body: JSON.stringify(response)
+            };
+        }
+
+        // PUT - Update existing booking
+        if (event.httpMethod === 'PUT') {
+            const bookingId = event.queryStringParameters?.id;
+
+            if (!bookingId) {
+                return {
+                    statusCode: 400,
+                    headers,
+                    body: JSON.stringify({ error: 'Booking ID is required for updates' })
+                };
+            }
+
+            const {
+                roomId, title, description, contactName, date,
+                startTime, endTime, isRecurring, recurrenceType, recurrenceEndDate
+            } = JSON.parse(event.body);
+
+            console.log(`📝 Updating booking ${bookingId}`);
+
+            // Check if booking exists
+            const existingBooking = await client.query(
+                'SELECT * FROM bookings WHERE id = $1',
+                [parseInt(bookingId)]
+            );
+
+            if (existingBooking.rows.length === 0) {
+                return {
+                    statusCode: 404,
+                    headers,
+                    body: JSON.stringify({ error: 'Booking not found' })
+                };
+            }
+
+            const formattedStartTime = formatTimeSlot(startTime);
+            const formattedEndTime = formatTimeSlot(endTime);
+            const formattedDate = formatDate(date);
+
+            // Check for conflicts (excluding current booking)
+            const conflicts = await checkBookingConflicts(
+                client, parseInt(roomId), formattedDate, formattedStartTime, formattedEndTime, parseInt(bookingId)
+            );
+
+            if (conflicts.length > 0) {
+                return {
+                    statusCode: 409,
+                    headers,
+                    body: JSON.stringify({
+                        error: 'Zeitkonflikt mit bestehender Buchung',
+                        conflicts: conflicts.map(c => ({
+                            id: c.id,
+                            title: c.title,
+                            time: `${formatTimeSlot(c.start_time)} - ${formatTimeSlot(c.end_time)}`
+                        }))
+                    })
+                };
+            }
+
+            // Update booking
+            const updateResult = await client.query(
+                `UPDATE bookings SET 
+                    room_id = $1, title = $2, description = $3, contact_name = $4,
+                    booking_date = $5, start_time = $6, end_time = $7,
+                    is_recurring = $8, recurrence_type = $9, recurrence_end_date = $10
+                WHERE id = $11
+                RETURNING *`,
+                [
+                    parseInt(roomId), title, description || '', contactName,
+                    formattedDate, formattedStartTime, formattedEndTime,
+                    isRecurring, isRecurring ? recurrenceType : null,
+                    isRecurring ? recurrenceEndDate : null, parseInt(bookingId)
+                ]
+            );
+
+            const updatedBooking = updateResult.rows[0];
+            console.log(`✅ Booking ${bookingId} updated`);
+
+            return {
+                statusCode: 200,
+                headers,
+                body: JSON.stringify({
+                    ...updatedBooking,
+                    booking_date: formatDate(updatedBooking.booking_date),
+                    start_time: formatTimeSlot(updatedBooking.start_time),
+                    end_time: formatTimeSlot(updatedBooking.end_time),
+                    time_slot: formatTimeSlot(updatedBooking.start_time)
+                })
+            };
+        }
+
+        // DELETE - Delete booking (and child bookings if recurring)
+        if (event.httpMethod === 'DELETE') {
+            const bookingId = event.queryStringParameters?.id;
+            const deleteRecurring = event.queryStringParameters?.deleteRecurring === 'true';
+
+            if (!bookingId) {
+                return {
+                    statusCode: 400,
+                    headers,
+                    body: JSON.stringify({ error: 'Booking ID is required for deletion' })
+                };
+            }
+
+            console.log(`🗑️ Deleting booking ${bookingId}, deleteRecurring: ${deleteRecurring}`);
+
+            // Check if booking exists
+            const existingBooking = await client.query(
+                'SELECT * FROM bookings WHERE id = $1',
+                [parseInt(bookingId)]
+            );
+
+            if (existingBooking.rows.length === 0) {
+                return {
+                    statusCode: 404,
+                    headers,
+                    body: JSON.stringify({ error: 'Booking not found' })
+                };
+            }
+
+            let deletedCount = 0;
+
+            // Delete child bookings if this is a recurring parent and deleteRecurring is true
+            if (deleteRecurring && existingBooking.rows[0].is_recurring) {
+                const deleteChildrenResult = await client.query(
+                    'DELETE FROM bookings WHERE parent_booking_id = $1',
+                    [parseInt(bookingId)]
+                );
+                deletedCount += deleteChildrenResult.rowCount;
+                console.log(`🗑️ Deleted ${deleteChildrenResult.rowCount} child bookings`);
+            }
+
+            // Delete main booking
+            const deleteMainResult = await client.query(
+                'DELETE FROM bookings WHERE id = $1',
+                [parseInt(bookingId)]
+            );
+            deletedCount += deleteMainResult.rowCount;
+
+            console.log(`✅ Deleted ${deletedCount} booking(s)`);
+
+            return {
+                statusCode: 200,
+                headers,
+                body: JSON.stringify({
+                    message: 'Booking deleted successfully',
+                    deletedCount: deletedCount
+                })
             };
         }
 
@@ -288,36 +549,13 @@ exports.handler = async (event, context) => {
         const connectionTime = Date.now() - startTime;
         console.error(`❌ Database error after ${connectionTime}ms:`, error);
 
-        // Detailed error classification
-        let errorType = 'Database error';
-        let suggestion = 'Check logs for details';
-
-        if (error.message.includes('ECONNREFUSED')) {
-            errorType = 'Connection refused';
-            suggestion = 'Verify DATABASE_URL hostname and port';
-        } else if (error.message.includes('ENOTFOUND')) {
-            errorType = 'Host not found';
-            suggestion = 'Check if Neon hostname is correct in DATABASE_URL';
-        } else if (error.message.includes('timeout')) {
-            errorType = 'Connection timeout';
-            suggestion = 'Database may be sleeping, try again in a moment';
-        } else if (error.message.includes('authentication')) {
-            errorType = 'Authentication failed';
-            suggestion = 'Verify username and password in DATABASE_URL';
-        } else if (error.message.includes('does not exist')) {
-            errorType = 'Database or table not found';
-            suggestion = 'Run database schema setup';
-        }
-
         return {
             statusCode: 500,
             headers,
             body: JSON.stringify({
-                error: errorType,
-                suggestion: suggestion,
+                error: 'Database error',
                 details: error.message,
                 timestamp: new Date().toISOString(),
-                deployId: process.env.DEPLOY_ID || 'unknown',
                 connectionTime: connectionTime
             })
         };
@@ -332,3 +570,10 @@ exports.handler = async (event, context) => {
         }
     }
 };
+
+// Helper function to add an hour to a time string
+function addHourToTime(timeString) {
+    const [hours, minutes] = timeString.split(':').map(Number);
+    const newHours = (hours + 1) % 24;
+    return `${String(newHours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+}
