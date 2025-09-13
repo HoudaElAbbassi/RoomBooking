@@ -4,8 +4,15 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 
-// JWT Secret - in Produktion über Environment Variable setzen
-const JWT_SECRET = process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-in-production';
+// JWT Secret - KEINE Fallback-Werte in Produktion verwenden
+function getJWTSecret() {
+    const secret = process.env.JWT_SECRET;
+    if (!secret) {
+        throw new Error('JWT_SECRET environment variable must be configured');
+    }
+    return secret;
+}
+
 const JWT_EXPIRES_IN = '24h';
 
 // Environment Variable Validation
@@ -15,6 +22,37 @@ function validateEnvironment() {
         throw new Error('DATABASE_URL environment variable not configured');
     }
     return dbUrl;
+}
+
+// Rate limiting: IP-basierte Zugriffszählung
+const loginAttempts = new Map();
+const MAX_LOGIN_ATTEMPTS = 5;
+const LOCKOUT_TIME = 15 * 60 * 1000; // 15 Minuten in Millisekunden
+
+function checkRateLimit(ip) {
+    const now = Date.now();
+    const userAttempts = loginAttempts.get(ip) || { count: 0, timestamp: now };
+
+    // Prüfen, ob die Sperrzeit vorbei ist
+    if (userAttempts.count >= MAX_LOGIN_ATTEMPTS && now - userAttempts.timestamp < LOCKOUT_TIME) {
+        const remainingTime = Math.ceil((LOCKOUT_TIME - (now - userAttempts.timestamp)) / 60000);
+        return {
+            allowed: false,
+            remainingTime: remainingTime
+        };
+    }
+
+    // Zurücksetzen des Zählers nach Ablauf der Sperrzeit
+    if (userAttempts.count >= MAX_LOGIN_ATTEMPTS && now - userAttempts.timestamp >= LOCKOUT_TIME) {
+        userAttempts.count = 0;
+    }
+
+    // Aktualisieren des Zählers
+    userAttempts.count++;
+    userAttempts.timestamp = now;
+    loginAttempts.set(ip, userAttempts);
+
+    return { allowed: true };
 }
 
 // Password hashing
@@ -27,6 +65,36 @@ async function verifyPassword(password, hash) {
     return await bcrypt.compare(password, hash);
 }
 
+// Passwort-Komplexität überprüfen
+function validatePassword(password) {
+    // Mindestens 8 Zeichen
+    if (password.length < 8) {
+        return { valid: false, message: 'Passwort muss mindestens 8 Zeichen lang sein' };
+    }
+
+    // Prüfung auf Komplexität
+    const hasUpperCase = /[A-Z]/.test(password);
+    const hasLowerCase = /[a-z]/.test(password);
+    const hasNumbers = /\d/.test(password);
+    const hasSpecialChar = /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]+/.test(password);
+
+    if (!hasUpperCase || !hasLowerCase || !hasNumbers) {
+        return {
+            valid: false,
+            message: 'Passwort muss mindestens einen Großbuchstaben, einen Kleinbuchstaben und eine Zahl enthalten'
+        };
+    }
+
+    if (!hasSpecialChar) {
+        return {
+            valid: false,
+            message: 'Passwort muss mindestens ein Sonderzeichen enthalten (z.B. !@#$%^&*)'
+        };
+    }
+
+    return { valid: true };
+}
+
 // JWT Token generation
 function generateToken(user) {
     return jwt.sign(
@@ -35,7 +103,7 @@ function generateToken(user) {
             username: user.username,
             role: user.role
         },
-        JWT_SECRET,
+        getJWTSecret(),
         { expiresIn: JWT_EXPIRES_IN }
     );
 }
@@ -48,15 +116,22 @@ function generateSessionToken() {
 // Verify JWT Token
 function verifyToken(token) {
     try {
-        return jwt.verify(token, JWT_SECRET);
+        return jwt.verify(token, getJWTSecret());
     } catch (error) {
         return null;
     }
 }
 
 exports.handler = async (event, context) => {
+    // CORS-Einstellungen verbessern: Nur spezifische Ursprünge erlauben
+    const allowedOrigins = process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : ['http://localhost:3000'];
+    const origin = event.headers.origin || '*';
+
+    // Prüfen, ob der Ursprung erlaubt ist, sonst Standard-Domain verwenden
+    const allowedOrigin = allowedOrigins.includes(origin) ? origin : allowedOrigins[0];
+
     const headers = {
-        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Origin': allowedOrigin,
         'Access-Control-Allow-Headers': 'Content-Type, Authorization',
         'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
         'Content-Type': 'application/json'
@@ -66,6 +141,9 @@ exports.handler = async (event, context) => {
         return { statusCode: 200, headers };
     }
 
+    // Client IP für Rate-Limiting
+    const clientIP = event.headers['client-ip'] || event.headers['x-forwarded-for'] || 'unknown';
+
     let dbUrl;
     try {
         dbUrl = validateEnvironment();
@@ -74,8 +152,7 @@ exports.handler = async (event, context) => {
             statusCode: 500,
             headers,
             body: JSON.stringify({
-                error: 'Configuration error',
-                details: error.message
+                error: 'Configuration error'
             })
         };
     }
@@ -98,13 +175,25 @@ exports.handler = async (event, context) => {
 
         // Login Endpoint
         if (event.httpMethod === 'POST' && event.path.endsWith('/login')) {
-            const { username, password } = JSON.parse(event.body);
+            // Rate-Limiting prüfen
+            const rateCheck = checkRateLimit(clientIP);
+            if (!rateCheck.allowed) {
+                return {
+                    statusCode: 429,
+                    headers,
+                    body: JSON.stringify({
+                        error: `Zu viele Anmeldeversuche. Bitte versuchen Sie es in ${rateCheck.remainingTime} Minuten erneut.`
+                    })
+                };
+            }
+
+            const { username, password, rememberMe } = JSON.parse(event.body);
 
             if (!username || !password) {
                 return {
                     statusCode: 400,
                     headers,
-                    body: JSON.stringify({ error: 'Username and password are required' })
+                    body: JSON.stringify({ error: 'Benutzername und Passwort sind erforderlich' })
                 };
             }
 
@@ -118,7 +207,7 @@ exports.handler = async (event, context) => {
                 return {
                     statusCode: 401,
                     headers,
-                    body: JSON.stringify({ error: 'Invalid credentials' })
+                    body: JSON.stringify({ error: 'Ungültige Anmeldedaten' })
                 };
             }
 
@@ -128,7 +217,7 @@ exports.handler = async (event, context) => {
                 return {
                     statusCode: 401,
                     headers,
-                    body: JSON.stringify({ error: 'Account is deactivated' })
+                    body: JSON.stringify({ error: 'Konto ist deaktiviert' })
                 };
             }
 
@@ -138,14 +227,19 @@ exports.handler = async (event, context) => {
                 return {
                     statusCode: 401,
                     headers,
-                    body: JSON.stringify({ error: 'Invalid credentials' })
+                    body: JSON.stringify({ error: 'Ungültige Anmeldedaten' })
                 };
             }
+
+            // Bei erfolgreicher Anmeldung Login-Versuche zurücksetzen
+            loginAttempts.delete(clientIP);
 
             // Generate tokens
             const jwtToken = generateToken(user);
             const sessionToken = generateSessionToken();
-            const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+
+            // Ablaufzeit je nach "Angemeldet bleiben" Option setzen
+            const expiresAt = new Date(Date.now() + (rememberMe ? 30 : 1) * 24 * 60 * 60 * 1000); // 30 oder 1 Tag
 
             // Save session
             await client.query(
@@ -182,7 +276,7 @@ exports.handler = async (event, context) => {
                 return {
                     statusCode: 401,
                     headers,
-                    body: JSON.stringify({ error: 'No authorization token provided' })
+                    body: JSON.stringify({ error: 'Kein Autorisierungstoken angegeben' })
                 };
             }
 
@@ -200,7 +294,7 @@ exports.handler = async (event, context) => {
             return {
                 statusCode: 200,
                 headers,
-                body: JSON.stringify({ message: 'Logout successful' })
+                body: JSON.stringify({ message: 'Abmeldung erfolgreich' })
             };
         }
 
@@ -211,7 +305,7 @@ exports.handler = async (event, context) => {
                 return {
                     statusCode: 401,
                     headers,
-                    body: JSON.stringify({ error: 'No authorization token provided' })
+                    body: JSON.stringify({ error: 'Kein Autorisierungstoken angegeben' })
                 };
             }
 
@@ -222,7 +316,7 @@ exports.handler = async (event, context) => {
                 return {
                     statusCode: 401,
                     headers,
-                    body: JSON.stringify({ error: 'Invalid token' })
+                    body: JSON.stringify({ error: 'Ungültiges Token' })
                 };
             }
 
@@ -236,7 +330,7 @@ exports.handler = async (event, context) => {
                 return {
                     statusCode: 401,
                     headers,
-                    body: JSON.stringify({ error: 'Session expired or invalid' })
+                    body: JSON.stringify({ error: 'Sitzung abgelaufen oder ungültig' })
                 };
             }
 
@@ -246,7 +340,7 @@ exports.handler = async (event, context) => {
                 return {
                     statusCode: 401,
                     headers,
-                    body: JSON.stringify({ error: 'Account is deactivated' })
+                    body: JSON.stringify({ error: 'Konto ist deaktiviert' })
                 };
             }
 
@@ -273,7 +367,17 @@ exports.handler = async (event, context) => {
                 return {
                     statusCode: 400,
                     headers,
-                    body: JSON.stringify({ error: 'Username, email, and password are required' })
+                    body: JSON.stringify({ error: 'Benutzername, E-Mail und Passwort sind erforderlich' })
+                };
+            }
+
+            // Passwort-Komplexität überprüfen
+            const passwordValidation = validatePassword(password);
+            if (!passwordValidation.valid) {
+                return {
+                    statusCode: 400,
+                    headers,
+                    body: JSON.stringify({ error: passwordValidation.message })
                 };
             }
 
@@ -287,7 +391,7 @@ exports.handler = async (event, context) => {
                 return {
                     statusCode: 409,
                     headers,
-                    body: JSON.stringify({ error: 'Username or email already exists' })
+                    body: JSON.stringify({ error: 'Benutzername oder E-Mail existiert bereits' })
                 };
             }
 
@@ -304,18 +408,80 @@ exports.handler = async (event, context) => {
                 statusCode: 201,
                 headers,
                 body: JSON.stringify({
-                    message: 'User created successfully',
+                    message: 'Benutzer erfolgreich erstellt',
                     user: newUser
+                })
+            };
+        }
 
-            // Passwort-Komplexität überprüfen
-            const passwordValidation = validatePassword(password);
-            if (!passwordValidation.valid) {
+        // Update Profile Endpoint (neu)
+        if (event.httpMethod === 'POST' && event.path.endsWith('/update-profile')) {
+            const authHeader = event.headers.authorization;
+            if (!authHeader) {
+                return {
+                    statusCode: 401,
+                    headers,
+                    body: JSON.stringify({ error: 'Kein Autorisierungstoken angegeben' })
+                };
+            }
+
+            const token = authHeader.replace('Bearer ', '');
+            const decoded = verifyToken(token);
+
+            if (!decoded) {
+                return {
+                    statusCode: 401,
+                    headers,
+                    body: JSON.stringify({ error: 'Ungültiges Token' })
+                };
+            }
+
+            const { username, email } = JSON.parse(event.body);
+
+            if (!username || !email) {
                 return {
                     statusCode: 400,
                     headers,
-                    body: JSON.stringify({ error: passwordValidation.message })
+                    body: JSON.stringify({ error: 'Benutzername und E-Mail sind erforderlich' })
                 };
             }
+
+            // Überprüfen, ob Benutzername oder E-Mail bereits verwendet wird (außer vom aktuellen Benutzer)
+            const existingUser = await client.query(
+                'SELECT id FROM users WHERE (username = $1 OR email = $2) AND id != $3',
+                [username, email, decoded.userId]
+            );
+
+            if (existingUser.rows.length > 0) {
+                return {
+                    statusCode: 409,
+                    headers,
+                    body: JSON.stringify({ error: 'Benutzername oder E-Mail wird bereits verwendet' })
+                };
+            }
+
+            // Profil aktualisieren
+            const updateResult = await client.query(
+                'UPDATE users SET username = $1, email = $2 WHERE id = $3 RETURNING id, username, email, role',
+                [username, email, decoded.userId]
+            );
+
+            if (updateResult.rows.length === 0) {
+                return {
+                    statusCode: 404,
+                    headers,
+                    body: JSON.stringify({ error: 'Benutzer nicht gefunden' })
+                };
+            }
+
+            const updatedUser = updateResult.rows[0];
+
+            return {
+                statusCode: 200,
+                headers,
+                body: JSON.stringify({
+                    message: 'Profil erfolgreich aktualisiert',
+                    user: updatedUser
                 })
             };
         }
@@ -323,7 +489,7 @@ exports.handler = async (event, context) => {
         return {
             statusCode: 405,
             headers,
-            body: JSON.stringify({ error: 'Method not allowed' })
+            body: JSON.stringify({ error: 'Methode nicht erlaubt' })
         };
 
     } catch (error) {
@@ -332,8 +498,7 @@ exports.handler = async (event, context) => {
             statusCode: 500,
             headers,
             body: JSON.stringify({
-                error: 'Authentication error',
-                details: error.message
+                error: 'Authentifizierungsfehler'
             })
         };
     } finally {

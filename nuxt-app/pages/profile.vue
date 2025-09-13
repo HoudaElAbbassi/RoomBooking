@@ -48,11 +48,11 @@
           <div class="mt-6">
             <button
                 type="submit"
-                :disabled="userStore.loading"
+                :disabled="userStore.loading || isUpdatingProfile"
                 class="px-6 py-3 bg-blue-500 text-white rounded-md hover:bg-blue-600 disabled:opacity-50"
             >
-              <i v-if="userStore.loading" class="fas fa-spinner fa-spin mr-2"></i>
-              {{ userStore.loading ? 'Wird gespeichert...' : 'Profil aktualisieren' }}
+              <i v-if="userStore.loading || isUpdatingProfile" class="fas fa-spinner fa-spin mr-2"></i>
+              {{ userStore.loading || isUpdatingProfile ? 'Wird gespeichert...' : 'Profil aktualisieren' }}
             </button>
           </div>
         </form>
@@ -245,6 +245,7 @@ const updateSuccess = ref('')
 const passwordError = ref('')
 const passwordSuccess = ref('')
 const isChangingPassword = ref(false)
+const isUpdatingProfile = ref(false)
 
 // Computed
 const myBookings = computed(() => {
@@ -252,8 +253,9 @@ const myBookings = computed(() => {
 
   return bookingStore.bookings.filter(booking =>
       booking.contact_name === userStore.user.username ||
+      booking.contactName === userStore.user.username ||
       booking.user_id === userStore.user.id
-  ).sort((a, b) => new Date(b.date) - new Date(a.date))
+  ).sort((a, b) => new Date(b.date || b.booking_date) - new Date(a.date || a.booking_date))
 })
 
 // Methods
@@ -270,6 +272,8 @@ function formatDate(dateString) {
   if (!dateString) return 'Unbekannt'
 
   const date = new Date(dateString)
+  if (isNaN(date)) return 'Unbekannt'
+
   return date.toLocaleDateString('de-DE', {
     year: 'numeric',
     month: 'long',
@@ -278,7 +282,7 @@ function formatDate(dateString) {
 }
 
 function getRoomName(roomId) {
-  const room = roomStore.rooms.find(r => r.id === roomId)
+  const room = roomStore.rooms.find(r => r.id === roomId || r.id === Number(roomId))
   return room ? room.name : 'Unbekannter Raum'
 }
 
@@ -321,12 +325,35 @@ function canCancelBooking(date, timeSlot) {
 async function updateProfile() {
   updateError.value = ''
   updateSuccess.value = ''
+  isUpdatingProfile.value = true
 
   try {
-    await userStore.updateProfile({
-      username: profileForm.value.username,
-      email: profileForm.value.email
+    // API-Aufruf an Backend (angenommen: /.netlify/functions/auth/update-profile)
+    const response = await fetch('/.netlify/functions/auth/update-profile', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
+      },
+      body: JSON.stringify({
+        username: profileForm.value.username,
+        email: profileForm.value.email
+      })
     })
+
+    const data = await response.json()
+
+    if (!response.ok) {
+      throw new Error(data.error || 'Fehler beim Aktualisieren des Profils')
+    }
+
+    // Userdaten im Store aktualisieren
+    userStore.user = { ...userStore.user, ...data.user }
+
+    if (process.client) {
+      const storage = localStorage.getItem('auth_token') ? localStorage : sessionStorage
+      storage.setItem('user_data', JSON.stringify(userStore.user))
+    }
 
     updateSuccess.value = 'Profil erfolgreich aktualisiert!'
 
@@ -335,6 +362,22 @@ async function updateProfile() {
     }, 3000)
   } catch (error) {
     updateError.value = error.message || 'Fehler beim Aktualisieren des Profils'
+  } finally {
+    isUpdatingProfile.value = false
+  }
+}
+
+async function cancelBooking(bookingId) {
+  try {
+    await bookingStore.deleteBooking(bookingId)
+
+    if (process.client && window.$toast) {
+      window.$toast.success('Buchung erfolgreich storniert!', { title: 'Storniert', duration: 4000 })
+    }
+  } catch (error) {
+    if (process.client && window.$toast) {
+      window.$toast.error('Fehler beim Stornieren: ' + error.message, { title: 'Fehler', duration: 4000 })
+    }
   }
 }
 
@@ -358,7 +401,6 @@ async function changePassword() {
   isChangingPassword.value = true
 
   try {
-    // API-Aufruf zur Passwortänderung
     const response = await fetch('/.netlify/functions/password/change-password', {
       method: 'POST',
       headers: {
@@ -377,7 +419,6 @@ async function changePassword() {
       throw new Error(data.error || 'Fehler beim Ändern des Passworts')
     }
 
-    // Erfolgsmeldung anzeigen
     if (process.client && window.$toast) {
       window.$toast.success('Passwort erfolgreich geändert. Sie werden abgemeldet...', {
         title: 'Passwort geändert',
@@ -387,20 +428,16 @@ async function changePassword() {
       passwordSuccess.value = 'Passwort erfolgreich geändert. Sie werden abgemeldet...'
     }
 
-    // Reset form
     passwordForm.value = {
       currentPassword: '',
       newPassword: '',
       confirmPassword: ''
     }
 
-    // Kurze Verzögerung, dann Abmeldung
     setTimeout(() => {
       userStore.logout()
     }, 3000)
-
   } catch (error) {
-    console.error('Passwortänderung fehlgeschlagen:', error)
     passwordError.value = error.message || 'Fehler beim Ändern des Passworts'
 
     if (process.client && window.$toast) {
@@ -414,14 +451,11 @@ async function changePassword() {
   }
 }
 
-// Hilfsfunktion zur Validierung der Passwort-Komplexität
 function validatePassword(password) {
-  // Mindestens 8 Zeichen
   if (password.length < 8) {
     return { valid: false, message: 'Passwort muss mindestens 8 Zeichen lang sein' }
   }
 
-  // Prüfung auf Komplexität
   const hasUpperCase = /[A-Z]/.test(password)
   const hasLowerCase = /[a-z]/.test(password)
   const hasNumbers = /\d/.test(password)
@@ -444,3 +478,19 @@ function validatePassword(password) {
   return { valid: true }
 }
 
+onMounted(async () => {
+  initializeForm()
+
+  if (roomStore.rooms.length === 0) {
+    await roomStore.fetchRooms()
+  }
+
+  if (bookingStore.bookings.length === 0) {
+    await bookingStore.fetchBookings()
+  }
+})
+</script>
+
+<style scoped>
+/* Fügen Sie hier Ihre benutzerdefinierten Stile hinzu */
+</style>
