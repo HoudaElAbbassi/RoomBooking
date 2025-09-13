@@ -1,4 +1,4 @@
-<!-- nuxt-app/components/Calendar.vue -->
+<!-- nuxt-app/components/Calendar.vue - Fixed version -->
 <template>
   <div class="bg-white rounded-lg shadow p-6">
     <div class="flex items-center justify-between mb-6">
@@ -6,7 +6,7 @@
       <div class="flex items-center gap-4">
         <!-- Debug Info -->
         <div class="text-sm text-gray-500">
-          {{ bookings.length }} Buchungen geladen
+          {{ bookings.length }} Buchungen geladen, {{ visibleBookings.length }} sichtbar
         </div>
 
         <!-- Navigation -->
@@ -128,11 +128,26 @@
       <h4 class="font-semibold text-sm mb-2">🔍 Debug Info:</h4>
       <div class="text-xs space-y-1">
         <div><strong>Aktueller Zeitraum:</strong> {{ weekDays[0]?.date }} - {{ weekDays[6]?.date }}</div>
-        <div><strong>Gefilterte Buchungen:</strong> {{ visibleBookings.length }} von {{ bookings.length }}</div>
+        <div><strong>Alle Buchungen:</strong> {{ bookings.length }}</div>
+        <div><strong>Sichtbare Buchungen:</strong> {{ visibleBookings.length }}</div>
         <div><strong>Raum-Filter:</strong> {{ filterRoomIds.length === 0 ? 'Alle' : filterRoomIds.join(', ') }}</div>
         <div><strong>Stores Status:</strong>
           Rooms: {{ roomStore.loading ? 'loading' : 'ready' }},
           Bookings: {{ bookingStore.loading ? 'loading' : 'ready' }}
+        </div>
+
+        <!-- Show sample booking structure for debugging -->
+        <div v-if="bookings.length > 0">
+          <strong>Sample Booking Structure:</strong>
+          <pre class="text-xs mt-1 p-2 bg-gray-100 rounded overflow-auto">{{ JSON.stringify(bookings[0], null, 2) }}</pre>
+        </div>
+
+        <!-- Show visible bookings for current week -->
+        <div>
+          <strong>Visible Bookings Details:</strong>
+          <div v-for="booking in visibleBookings" :key="booking.id" class="ml-2 text-xs">
+            - {{ booking.title }} | Room: {{ getBookingRoomId(booking) }} | Date: {{ getBookingDate(booking) }} | Time: {{ getBookingTimeSlot(booking) }}
+          </div>
         </div>
       </div>
       <button @click="showDebug = false" class="text-xs text-blue-600 mt-2">Debug ausblenden</button>
@@ -203,16 +218,39 @@ const visibleBookings = computed(() => {
   const weekStart = weekDays.value[0]?.date
   const weekEnd = weekDays.value[6]?.date
 
+  console.log('🔍 Filter Debug:', {
+    totalBookings: bookings.value.length,
+    weekStart,
+    weekEnd,
+    filterRoomIds: props.filterRoomIds
+  })
+
   return bookings.value.filter(booking => {
     const bookingDate = getBookingDate(booking)
     const bookingRoomId = getBookingRoomId(booking)
+
+    // Debug einzelne Buchung
+    console.log('🔍 Checking booking:', {
+      id: booking.id,
+      title: booking.title,
+      bookingDate,
+      bookingRoomId,
+      originalBooking: booking
+    })
 
     // Date filter
     const inDateRange = bookingDate >= weekStart && bookingDate <= weekEnd
 
     // Room filter (if specified)
     const roomMatch = props.filterRoomIds.length === 0 ||
+        props.filterRoomIds.includes(parseInt(bookingRoomId)) ||
         props.filterRoomIds.includes(bookingRoomId)
+
+    console.log('🔍 Filter result:', {
+      inDateRange,
+      roomMatch,
+      included: inDateRange && roomMatch
+    })
 
     return inDateRange && roomMatch
   })
@@ -249,20 +287,56 @@ function nextWeek() {
   currentWeekStart.value = newDate
 }
 
-// Data extraction helpers (handle both PostgreSQL and MongoDB formats)
+// FIXED: Data extraction helpers (handle both PostgreSQL and MongoDB formats)
 function getBookingDate(booking) {
-  return booking.date || booking.booking_date
+  // PostgreSQL uses 'booking_date', MongoDB/fallback might use 'date'
+  const date = booking.booking_date || booking.date
+
+  // Convert Date object to string if needed
+  if (date instanceof Date) {
+    return date.toISOString().split('T')[0]
+  }
+
+  return date
 }
 
 function getBookingRoomId(booking) {
+  // PostgreSQL uses 'room_id', MongoDB/fallback might use 'roomId'
   return booking.room_id || booking.roomId
 }
 
 function getBookingTimeSlot(booking) {
-  return booking.time_slot || booking.timeSlot
+  // PostgreSQL uses 'time_slot', MongoDB/fallback might use 'timeSlot'
+  let timeSlot = booking.time_slot || booking.timeSlot
+
+  // Handle time objects from PostgreSQL
+  if (typeof timeSlot === 'object' && timeSlot !== null) {
+    // If it's a time object, extract hours and minutes
+    const hours = String(timeSlot.hours || timeSlot.hour || 0).padStart(2, '0')
+    const minutes = String(timeSlot.minutes || timeSlot.minute || 0).padStart(2, '0')
+    return `${hours}:${minutes}`
+  }
+
+  // If it's already a string, make sure it's in HH:MM format
+  if (typeof timeSlot === 'string') {
+    if (timeSlot.length === 5 && timeSlot.includes(':')) {
+      return timeSlot // Already in HH:MM format
+    }
+
+    // Try to parse if it's in a different format
+    const match = timeSlot.match(/(\d{1,2}):?(\d{2})?/)
+    if (match) {
+      const hours = String(match[1]).padStart(2, '0')
+      const minutes = String(match[2] || '00').padStart(2, '0')
+      return `${hours}:${minutes}`
+    }
+  }
+
+  return timeSlot
 }
 
 function getBookingContactName(booking) {
+  // PostgreSQL uses 'contact_name', MongoDB/fallback might use 'contactName'
   return booking.contact_name || booking.contactName
 }
 
@@ -272,7 +346,10 @@ function getBookingsForSlot(date, timeSlot) {
     const bookingDate = getBookingDate(booking)
     const bookingTimeSlot = getBookingTimeSlot(booking)
 
-    return bookingDate === date && bookingTimeSlot === timeSlot
+    const dateMatch = bookingDate === date
+    const timeMatch = bookingTimeSlot === timeSlot
+
+    return dateMatch && timeMatch
   })
 }
 
@@ -291,18 +368,18 @@ const roomColors = {
 }
 
 function getBookingColor(roomId) {
-  const colorIndex = (roomId % Object.keys(roomColors).length) || 1
+  const colorIndex = (parseInt(roomId) % Object.keys(roomColors).length) || 1
   return roomColors[colorIndex] || roomColors[1]
 }
 
 function getRoomName(roomId) {
-  const room = rooms.value.find(r => r.id === roomId)
+  const room = rooms.value.find(r => r.id === parseInt(roomId))
   return room ? room.name : `Raum ${roomId}`
 }
 
 function getBookingCountForRoom(roomId) {
   return visibleBookings.value.filter(booking =>
-      getBookingRoomId(booking) === roomId
+      parseInt(getBookingRoomId(booking)) === parseInt(roomId)
   ).length
 }
 

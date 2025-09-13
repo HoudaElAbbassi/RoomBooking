@@ -1,4 +1,4 @@
-// netlify/functions/bookings.js - Production-ready mit Environment Validation
+// netlify/functions/bookings.js - Fixed version with proper time formatting
 const { Pool } = require('pg');
 
 // Environment Variable Validation
@@ -31,6 +31,46 @@ function validateEnvironment() {
     console.log('- Contains neon.tech:', dbUrl.includes('neon.tech'));
 
     return dbUrl;
+}
+
+// Helper function to format time consistently
+function formatTimeSlot(timeValue) {
+    if (!timeValue) return null;
+
+    // If it's already a string in HH:MM format
+    if (typeof timeValue === 'string' && timeValue.match(/^\d{2}:\d{2}$/)) {
+        return timeValue;
+    }
+
+    // If it's a time object from PostgreSQL
+    if (typeof timeValue === 'object' && timeValue !== null) {
+        const hours = String(timeValue.hours || timeValue.hour || 0).padStart(2, '0');
+        const minutes = String(timeValue.minutes || timeValue.minute || 0).padStart(2, '0');
+        return `${hours}:${minutes}`;
+    }
+
+    // If it's a string that needs formatting
+    if (typeof timeValue === 'string') {
+        const match = timeValue.match(/(\d{1,2}):?(\d{2})?/);
+        if (match) {
+            const hours = String(match[1]).padStart(2, '0');
+            const minutes = String(match[2] || '00').padStart(2, '0');
+            return `${hours}:${minutes}`;
+        }
+    }
+
+    return String(timeValue);
+}
+
+// Helper function to format date consistently
+function formatDate(dateValue) {
+    if (!dateValue) return null;
+
+    if (dateValue instanceof Date) {
+        return dateValue.toISOString().split('T')[0];
+    }
+
+    return String(dateValue);
 }
 
 exports.handler = async (event, context) => {
@@ -103,17 +143,17 @@ exports.handler = async (event, context) => {
             const { roomId, date, startDate, endDate } = event.queryStringParameters || {};
 
             let query = `
-        SELECT 
-          b.id, 
-          b.room_id, 
-          b.title, 
-          b.description, 
-          b.contact_name, 
-          b.booking_date as date, 
-          TO_CHAR(b.time_slot, 'HH24:MI') as time_slot,
-          b.created_at
-        FROM bookings b 
-      `;
+                SELECT
+                    b.id,
+                    b.room_id,
+                    b.title,
+                    b.description,
+                    b.contact_name,
+                    b.booking_date,
+                    b.time_slot,
+                    b.created_at
+                FROM bookings b
+            `;
             const params = [];
             const conditions = [];
 
@@ -142,10 +182,24 @@ exports.handler = async (event, context) => {
             const result = await client.query(query, params);
             console.log(`✅ Query returned ${result.rows.length} rows`);
 
+            // Format the results consistently
+            const formattedResults = result.rows.map(row => ({
+                id: row.id,
+                room_id: row.room_id,
+                title: row.title,
+                description: row.description,
+                contact_name: row.contact_name,
+                booking_date: formatDate(row.booking_date),
+                time_slot: formatTimeSlot(row.time_slot),
+                created_at: row.created_at
+            }));
+
+            console.log('📤 Sample formatted result:', formattedResults[0] || 'No results');
+
             return {
                 statusCode: 200,
                 headers,
-                body: JSON.stringify(result.rows)
+                body: JSON.stringify(formattedResults)
             };
         }
 
@@ -166,10 +220,16 @@ exports.handler = async (event, context) => {
                 };
             }
 
+            // Format input data
+            const formattedTimeSlot = formatTimeSlot(timeSlot);
+            const formattedDate = formatDate(date);
+
+            console.log(`📝 Formatted input: ${formattedDate} ${formattedTimeSlot}`);
+
             // Check for existing booking
             const existingBooking = await client.query(
                 'SELECT id FROM bookings WHERE room_id = $1 AND booking_date = $2 AND time_slot = $3',
-                [parseInt(roomId), date, timeSlot]
+                [parseInt(roomId), formattedDate, formattedTimeSlot]
             );
 
             if (existingBooking.rows.length > 0) {
@@ -184,25 +244,37 @@ exports.handler = async (event, context) => {
             // Create booking
             const result = await client.query(
                 `INSERT INTO bookings (room_id, title, description, contact_name, booking_date, time_slot) 
-         VALUES ($1, $2, $3, $4, $5, $6) 
-         RETURNING 
-           id, 
-           room_id, 
-           title, 
-           description, 
-           contact_name, 
-           booking_date as date, 
-           TO_CHAR(time_slot, 'HH24:MI') as time_slot,
-           created_at`,
-                [parseInt(roomId), title, description || '', contactName, date, timeSlot]
+                 VALUES ($1, $2, $3, $4, $5, $6) 
+                 RETURNING 
+                   id, 
+                   room_id, 
+                   title, 
+                   description, 
+                   contact_name, 
+                   booking_date, 
+                   time_slot,
+                   created_at`,
+                [parseInt(roomId), title, description || '', contactName, formattedDate, formattedTimeSlot]
             );
 
             console.log(`✅ Booking created with ID ${result.rows[0].id}`);
 
+            // Format the response consistently
+            const newBooking = {
+                id: result.rows[0].id,
+                room_id: result.rows[0].room_id,
+                title: result.rows[0].title,
+                description: result.rows[0].description,
+                contact_name: result.rows[0].contact_name,
+                booking_date: formatDate(result.rows[0].booking_date),
+                time_slot: formatTimeSlot(result.rows[0].time_slot),
+                created_at: result.rows[0].created_at
+            };
+
             return {
                 statusCode: 201,
                 headers,
-                body: JSON.stringify(result.rows[0])
+                body: JSON.stringify(newBooking)
             };
         }
 
