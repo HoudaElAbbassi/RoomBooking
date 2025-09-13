@@ -1,137 +1,184 @@
 <!-- nuxt-app/pages/index.vue -->
 <template>
-  <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
-    <!-- Linke Seitenleiste - Raumliste -->
-    <div class="md:col-span-1 bg-white rounded-lg shadow p-4">
-      <div class="flex justify-between items-center mb-4 pb-2 border-b">
-        <h2 class="text-xl font-semibold">Verfügbare Räume</h2>
-      </div>
-
-      <ul class="space-y-2">
-        <li v-for="room in rooms" :key="room._id || room.id"
-            class="p-3 rounded-md cursor-pointer transition-all"
-            :class="{'bg-blue-50 border-l-4 border-blue-500': (room._id || room.id) === selectedRoomId,
-                  'hover:bg-gray-50 border-l-4 border-transparent': (room._id || room.id) !== selectedRoomId}"
-            @click="selectRoom(room._id || room.id)">
-          <h3 class="font-medium">{{ room.name }}</h3>
-          <p class="text-sm text-gray-600">{{ room.location }} • {{ room.capacity }} Personen</p>
-        </li>
-      </ul>
-    </div>
-
-    <!-- Rechte Inhaltsseite -->
-    <div class="md:col-span-3 space-y-6">
-      <!-- Welcome Message -->
-      <div class="bg-blue-50 border border-blue-200 rounded-lg p-4">
-        <h2 class="text-lg font-semibold text-blue-900">
-          Willkommen, {{ userStore.userDisplayName }}!
-        </h2>
-        <p class="text-blue-700">
-          Sie sind als {{ userStore.user?.role === 'admin' ? 'Administrator' : 'Benutzer' }} angemeldet.
-        </p>
-      </div>
-
-      <!-- Raumdetails -->
-      <div class="bg-white rounded-lg shadow p-6" v-if="selectedRoom">
-        <h2 class="text-2xl font-semibold mb-3">{{ selectedRoom.name }}</h2>
-        <p class="text-gray-700 mb-4">{{ selectedRoom.description }}</p>
-        <p class="text-gray-700 mb-4">
-          <i class="fas fa-map-marker-alt mr-2 text-blue-500"></i> {{ selectedRoom.location }} •
-          <i class="fas fa-users ml-2 mr-2 text-blue-500"></i> {{ selectedRoom.capacity }} Personen
-        </p>
-        <div class="flex flex-wrap gap-2">
-          <span v-for="feature in selectedRoom.features" :key="feature"
-                class="px-3 py-1 bg-gray-100 rounded-full text-sm flex items-center">
-            <i class="fas fa-check text-blue-500 mr-1"></i> {{ feature }}
-          </span>
-        </div>
-      </div>
-
-      <!-- Buchungsbereich -->
+  <div class="container mx-auto px-4 py-6">
+    <!-- Quick Stats Cards -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
       <div class="bg-white rounded-lg shadow p-6">
-        <h2 class="text-xl font-semibold mb-4">Raum buchen</h2>
-
-        <div v-if="submitError" class="mb-4 p-3 bg-red-100 text-red-700 rounded-md">
-          {{ submitError }}
+        <div class="flex items-center">
+          <div class="p-3 rounded-full bg-blue-100 text-blue-600">
+            <i class="fas fa-door-open text-xl"></i>
+          </div>
+          <div class="ml-4">
+            <p class="text-2xl font-semibold text-gray-900">{{ rooms.length }}</p>
+            <p class="text-gray-600">Verfügbare Räume</p>
+          </div>
         </div>
-
-        <form @submit.prevent="submitBooking">
-          <div class="mb-4">
-            <label class="block text-gray-700 font-medium mb-2">Datum</label>
-            <input type="date" v-model="bookingData.date"
-                   class="w-full p-2 border rounded"
-                   :min="today">
-          </div>
-
-          <div class="mb-4">
-            <label class="block text-gray-700 font-medium mb-2">Zeit</label>
-            <select v-model="bookingData.timeSlot" class="w-full p-2 border rounded">
-              <option v-for="slot in timeSlots" :key="slot" :value="slot">
-                {{ slot }} Uhr
-              </option>
-            </select>
-          </div>
-
-          <div class="mb-4">
-            <label class="block text-gray-700 font-medium mb-2">Titel</label>
-            <input type="text" v-model="bookingData.title"
-                   class="w-full p-2 border rounded"
-                   placeholder="Titel der Buchung"
-                   required>
-          </div>
-
-          <div class="mb-4">
-            <label class="block text-gray-700 font-medium mb-2">Kontaktperson</label>
-            <input type="text" v-model="bookingData.contactName"
-                   class="w-full p-2 border rounded"
-                   placeholder="Ihr Name"
-                   required>
-          </div>
-
-          <button type="submit"
-                  class="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
-                  :disabled="isSubmitting">
-            {{ isSubmitting ? 'Wird gespeichert...' : 'Raum buchen' }}
-          </button>
-        </form>
       </div>
 
-      <!-- Buchungsübersicht -->
       <div class="bg-white rounded-lg shadow p-6">
-        <h2 class="text-xl font-semibold mb-4">Aktuelle Buchungen</h2>
-
-        <div v-if="isLoading" class="text-center py-4">
-          <i class="fas fa-spinner fa-spin text-blue-500 text-2xl"></i>
-          <p class="mt-2 text-gray-600">Buchungen werden geladen...</p>
+        <div class="flex items-center">
+          <div class="p-3 rounded-full bg-green-100 text-green-600">
+            <i class="fas fa-calendar-check text-xl"></i>
+          </div>
+          <div class="ml-4">
+            <p class="text-2xl font-semibold text-gray-900">{{ todayBookings.length }}</p>
+            <p class="text-gray-600">Buchungen heute</p>
+          </div>
         </div>
+      </div>
 
-        <div v-else-if="roomBookings.length === 0" class="text-gray-500">
-          Keine Buchungen für diesen Raum vorhanden.
-        </div>
-
-        <div v-else class="space-y-3">
-          <div v-for="booking in roomBookings" :key="booking._id || booking.id"
-               class="p-3 border rounded-md">
-            <div class="flex justify-between">
-              <strong>{{ booking.title }}</strong>
-              <span>{{ booking.date }}, {{ booking.timeSlot || booking.time_slot }} Uhr</span>
-            </div>
-            <div class="text-gray-600 text-sm">
-              Kontakt: {{ booking.contactName || booking.contact_name }}
-            </div>
+      <div class="bg-white rounded-lg shadow p-6">
+        <div class="flex items-center">
+          <div class="p-3 rounded-full bg-purple-100 text-purple-600">
+            <i class="fas fa-user text-xl"></i>
+          </div>
+          <div class="ml-4">
+            <p class="text-lg font-semibold text-gray-900">{{ userStore.userDisplayName }}</p>
+            <p class="text-gray-600">Angemeldet als {{ userStore.user?.role === 'admin' ? 'Admin' : 'Benutzer' }}</p>
           </div>
         </div>
       </div>
     </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
+      <!-- Raumliste Sidebar -->
+      <div class="lg:col-span-1">
+        <RoomList />
+      </div>
+
+      <!-- Hauptinhalt -->
+      <div class="lg:col-span-3 space-y-6">
+        <!-- Schnellzugriff Actions -->
+        <div class="bg-white rounded-lg shadow p-6">
+          <h2 class="text-xl font-semibold mb-4">Schnellzugriff</h2>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <!-- Raum buchen -->
+            <button
+                @click="openBookingModal"
+                class="p-4 border-2 border-blue-200 rounded-lg hover:border-blue-400 hover:bg-blue-50 transition-all text-left group"
+            >
+              <div class="flex items-center">
+                <div class="p-3 rounded-full bg-blue-100 text-blue-600 group-hover:bg-blue-200">
+                  <i class="fas fa-plus text-xl"></i>
+                </div>
+                <div class="ml-4">
+                  <h3 class="font-medium text-gray-900">Raum buchen</h3>
+                  <p class="text-gray-600 text-sm">Neue Buchung erstellen</p>
+                </div>
+              </div>
+            </button>
+
+            <!-- Kalender öffnen -->
+            <NuxtLink
+                to="/calendar"
+                class="p-4 border-2 border-green-200 rounded-lg hover:border-green-400 hover:bg-green-50 transition-all text-left group block"
+            >
+              <div class="flex items-center">
+                <div class="p-3 rounded-full bg-green-100 text-green-600 group-hover:bg-green-200">
+                  <i class="fas fa-calendar-alt text-xl"></i>
+                </div>
+                <div class="ml-4">
+                  <h3 class="font-medium text-gray-900">Kalenderübersicht</h3>
+                  <p class="text-gray-600 text-sm">Alle Buchungen anzeigen</p>
+                </div>
+              </div>
+            </NuxtLink>
+          </div>
+        </div>
+
+        <!-- Ausgewählter Raum Details -->
+        <div class="bg-white rounded-lg shadow p-6" v-if="selectedRoom">
+          <div class="flex justify-between items-start mb-4">
+            <div>
+              <h2 class="text-2xl font-semibold">{{ selectedRoom.name }}</h2>
+              <p class="text-gray-600">
+                <i class="fas fa-map-marker-alt mr-2 text-blue-500"></i>
+                {{ selectedRoom.location }} •
+                <i class="fas fa-users ml-2 mr-2 text-blue-500"></i>
+                {{ selectedRoom.capacity }} Personen
+              </p>
+            </div>
+            <button
+                @click="openBookingModal"
+                class="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
+            >
+              <i class="fas fa-plus mr-2"></i>
+              Buchen
+            </button>
+          </div>
+
+          <p class="text-gray-700 mb-4">{{ selectedRoom.description }}</p>
+
+          <!-- Features -->
+          <div class="flex flex-wrap gap-2 mb-6">
+            <span
+                v-for="feature in selectedRoom.features"
+                :key="feature"
+                class="px-3 py-1 bg-gray-100 rounded-full text-sm flex items-center"
+            >
+              <i class="fas fa-check text-blue-500 mr-1"></i>
+              {{ feature }}
+            </span>
+          </div>
+
+          <!-- Heutige Buchungen -->
+          <div class="border-t pt-4">
+            <h3 class="text-lg font-medium mb-3">Buchungen heute</h3>
+
+            <div v-if="todayRoomBookings.length === 0" class="text-gray-500 py-4 text-center">
+              <i class="fas fa-calendar-times text-2xl mb-2"></i>
+              <p>Keine Buchungen für {{ selectedRoom.name }} heute.</p>
+            </div>
+
+            <div v-else class="space-y-3">
+              <div
+                  v-for="booking in todayRoomBookings"
+                  :key="booking.id"
+                  class="p-3 border rounded-lg hover:shadow-md transition-shadow"
+              >
+                <div class="flex justify-between items-start">
+                  <div>
+                    <h4 class="font-medium">{{ booking.title }}</h4>
+                    <p class="text-sm text-gray-600 mt-1">
+                      <i class="fas fa-clock mr-1"></i>
+                      {{ booking.time_slot || booking.timeSlot }} Uhr
+                    </p>
+                    <p class="text-sm text-gray-600">
+                      <i class="fas fa-user mr-1"></i>
+                      {{ booking.contact_name || booking.contactName }}
+                    </p>
+                    <p v-if="booking.description" class="text-sm text-gray-700 mt-2">
+                      {{ booking.description }}
+                    </p>
+                  </div>
+                  <span class="px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded-full">
+                    Heute
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Wenn kein Raum ausgewählt -->
+        <div v-else class="bg-white rounded-lg shadow p-6 text-center">
+          <i class="fas fa-door-open text-4xl text-gray-400 mb-4"></i>
+          <h3 class="text-lg font-medium text-gray-900 mb-2">Wählen Sie einen Raum aus</h3>
+          <p class="text-gray-600">Klicken Sie links auf einen Raum, um Details zu sehen</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Booking Modal -->
+    <BookingModal ref="bookingModalRef" />
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRoomStore } from '../stores/roomStore'
 import { useBookingStore } from '../stores/bookingStore'
 import { useUserStore } from '../stores/userStore'
-import DashboardQuickActions from '../components/DashboardQuickActions.vue'
 
 // Middleware für Authentication
 definePageMeta({
@@ -143,90 +190,46 @@ const roomStore = useRoomStore()
 const bookingStore = useBookingStore()
 const userStore = useUserStore()
 
-// UI-States
-const isSubmitting = ref(false)
-const submitError = ref('')
-const isLoading = computed(() => roomStore.loading || bookingStore.loading)
+// Refs
+const bookingModalRef = ref(null)
 
-// Raumdaten
+// Computed
 const rooms = computed(() => roomStore.rooms)
 const selectedRoomId = computed(() => roomStore.selectedRoomId)
 const selectedRoom = computed(() => roomStore.getSelectedRoom)
 
-// Buchungsdaten
-const timeSlots = computed(() => bookingStore.timeSlots)
 const today = computed(() => new Date().toISOString().split('T')[0])
-const roomBookings = computed(() =>
-    bookingStore.getBookingsForRoomAndDate(selectedRoomId.value, bookingData.value.date)
+
+const todayBookings = computed(() =>
+    bookingStore.bookings.filter(booking => booking.date === today.value)
 )
 
-// Formulardaten mit Benutzerinformationen vorausgefüllt
-const bookingData = ref({
-  date: today.value,
-  timeSlot: '09:00',
-  title: '',
-  contactName: ''
+const todayRoomBookings = computed(() => {
+  if (!selectedRoomId.value) return []
+  return todayBookings.value.filter(booking =>
+      booking.room_id == selectedRoomId.value || booking.roomId == selectedRoomId.value
+  )
 })
 
-// Watch userStore and update contactName when user is available
-watch(() => userStore.userDisplayName, (newName) => {
-  if (newName && newName !== 'Guest' && !bookingData.value.contactName) {
-    bookingData.value.contactName = newName
-  }
-}, { immediate: true })
-
-// Methoden
-function selectRoom(roomId) {
-  roomStore.selectRoom(roomId)
-}
-
-async function submitBooking() {
-  if (!bookingData.value.title || !bookingData.value.contactName) {
-    submitError.value = 'Bitte füllen Sie alle Pflichtfelder aus.'
-    return
-  }
-
-  isSubmitting.value = true
-  submitError.value = ''
-
-  try {
-    await bookingStore.addBooking({
-      roomId: selectedRoomId.value,
-      date: bookingData.value.date,
-      timeSlot: bookingData.value.timeSlot,
-      title: bookingData.value.title,
-      contactName: bookingData.value.contactName,
-      description: '',
-      userId: userStore.user?.id // Füge Benutzer-ID hinzu
+// Methods
+function openBookingModal() {
+  if (bookingModalRef.value) {
+    bookingModalRef.value.openModal({
+      date: today.value,
+      roomId: selectedRoomId.value
     })
-
-    // Formular zurücksetzen
-    bookingData.value.title = ''
-    // Behalte contactName für nächste Buchung
-
-    alert('Buchung erfolgreich gespeichert!')
-  } catch (error) {
-    submitError.value = `Es gab ein Problem beim Speichern: ${error.message}`
-    console.error('Fehler beim Buchungsversuch:', error)
-  } finally {
-    isSubmitting.value = false
   }
 }
 
-// Daten laden beim Initialisieren der Komponente
+// Initialize data
 onMounted(async () => {
   try {
-    // Räume und Buchungen laden
     await Promise.all([
       roomStore.fetchRooms(),
       bookingStore.fetchBookings()
     ])
   } catch (error) {
     console.error('Fehler beim Laden der Daten:', error)
-    // Als Fallback lokale Daten laden
-    if (bookingStore.bookings.length === 0) {
-      bookingStore.loadFromLocalStorage?.()
-    }
   }
 })
 </script>
