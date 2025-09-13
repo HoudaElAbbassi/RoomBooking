@@ -1,19 +1,45 @@
-<!-- app.vue -->
+<!-- nuxt-app/app.vue -->
 <template>
-  <div>
-    <header class="bg-white shadow-sm">
-      <div class="container mx-auto px-4 py-4 flex items-center">
-        <i class="fas fa-calendar-check text-blue-500 text-2xl mr-3"></i>
-        <h1 class="text-xl font-semibold">Raumbelegungssystem</h1>
-      </div>
-    </header>
+  <div class="min-h-screen bg-gray-50">
+    <!-- Navigation Header (nur wenn eingeloggt) -->
+    <DashboardHeader v-if="userStore.isAuthenticated" />
 
-    <main class="container mx-auto px-4 py-6">
+    <!-- Main Content -->
+    <main :class="userStore.isAuthenticated ? 'pt-0' : 'min-h-screen'">
       <NuxtPage />
     </main>
+
+    <!-- Global Loading Overlay -->
+    <div v-if="isGlobalLoading" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div class="bg-white rounded-lg p-6 flex items-center space-x-3">
+        <i class="fas fa-spinner fa-spin text-blue-500 text-xl"></i>
+        <span class="text-gray-700">Lädt...</span>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
-// Keine Store-Importe hier im app.vue nötig
+import { computed, onMounted } from 'vue'
+import { useUserStore } from '~/stores/userStore'
+
+const userStore = useUserStore()
+
+// Global loading state (optional)
+const isGlobalLoading = computed(() => {
+  return userStore.loading && (userStore.isAuthenticated === false && process.client)
+})
+
+// Initialize authentication on app start
+onMounted(() => {
+  userStore.initializeAuth()
+})
+
+// Set page title
+useHead({
+  title: 'Raumbelegungssystem',
+  meta: [
+    { name: 'description', content: 'Einfaches System zur Verwaltung von Raumbuchungen' }
+  ]
+})
 </script>

@@ -158,6 +158,7 @@ const myBookings = computed(() => {
   return bookingStore.bookings
       .filter(booking =>
           booking.contact_name === userStore.user.username ||
+          booking.contactName === userStore.user.username ||
           booking.user_id === userStore.user.id
       )
       .sort((a, b) => new Date(a.date) - new Date(b.date))
