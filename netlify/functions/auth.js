@@ -4,11 +4,13 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 
-// JWT Secret - KEINE Fallback-Werte in Produktion verwenden
+// JWT Secret - In Produktion immer über Umgebungsvariable setzen!
 function getJWTSecret() {
     const secret = process.env.JWT_SECRET;
     if (!secret) {
-        throw new Error('JWT_SECRET environment variable must be configured');
+        console.warn('WARNUNG: JWT_SECRET Umgebungsvariable nicht gefunden. Verwende unsicheren Fallback-Wert. Dies sollte in Produktionsumgebungen vermieden werden!');
+        // Fallback für Entwicklung und Tests - NICHT FÜR PRODUKTION VERWENDEN!
+        return 'your-super-secret-jwt-key-change-in-production';
     }
     return secret;
 }
