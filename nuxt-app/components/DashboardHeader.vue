@@ -5,7 +5,12 @@
       <div class="flex justify-between items-center">
         <!-- Logo & Title -->
         <div class="flex items-center">
-          <i class="fas fa-calendar-check text-blue-500 text-2xl mr-3"></i>
+          <!-- Ersetze das Icon durch das Logo -->
+          <img
+            src="/vest-logo-bearbeitet.png"
+            alt="Logo"
+            class="h-10 mr-3"
+          />
           <h1 class="text-xl font-semibold">Raumbelegungssystem</h1>
         </div>
 
