@@ -359,7 +359,7 @@ async function handleRegister() {
     }
 
     // Switch to login tab
-    activeTab.value = 'login'
+    showRegister.value = false
   } catch (error) {
     errorMessage.value = error.message || 'Registrierung fehlgeschlagen'
   }
