@@ -470,7 +470,17 @@ async function submitBooking() {
         `${recurringPreview.value.length} wiederkehrende Termine erfolgreich ${isEdit.value ? 'aktualisiert' : 'erstellt'}!` :
         `Buchung erfolgreich ${isEdit.value ? 'aktualisiert' : 'erstellt'}!`
 
-    alert(message)
+    // Toast-Benachrichtigung statt alert verwenden
+    if (process.client && window.$toast) {
+      const toastType = isEdit.value ? 'info' : 'success';
+      window.$toast[toastType](message, {
+        title: isEdit.value ? 'Buchung aktualisiert' : 'Buchung erstellt',
+        duration: 5000
+      });
+    } else {
+      // Fallback zum alten Alert, falls Toast nicht verfügbar
+      alert(message);
+    }
 
   } catch (error) {
     errorMessage.value = error.message
