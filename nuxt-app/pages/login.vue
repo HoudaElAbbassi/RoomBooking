@@ -219,30 +219,9 @@
             <div class="absolute inset-0 flex items-center">
               <div class="w-full border-t border-gray-300" />
             </div>
-            <div class="relative flex justify-center text-sm">
-              <span class="px-2 bg-white text-gray-500">oder</span>
-            </div>
-          </div>
-
-          <div class="mt-6">
-            <button
-                @click="toggleForm"
-                type="button"
-                class="w-full flex justify-center py-2 px-4 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-            >
-              {{ showRegister ? 'Bereits registriert? Anmelden' : 'Noch kein Konto? Registrieren' }}
-            </button>
           </div>
         </div>
 
-        <!-- Demo Accounts Info -->
-        <div class="mt-6 p-4 bg-gray-50 rounded-md">
-          <h3 class="text-sm font-medium text-gray-900 mb-2">Demo-Accounts:</h3>
-          <div class="text-xs text-gray-600 space-y-1">
-            <div><strong>Admin:</strong> admin / admin123</div>
-            <div><strong>User:</strong> demo / admin123</div>
-          </div>
-        </div>
       </div>
     </div>
   </div>
