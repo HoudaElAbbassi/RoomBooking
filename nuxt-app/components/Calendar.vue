@@ -1010,3 +1010,397 @@ onUnmounted(() => {
   }
 }
 </style>
+
+<!-- Enhanced showBookingDetails method for Calendar.vue -->
+<script>
+// Add this enhanced method to your existing Calendar.vue component
+
+function showBookingDetails(booking) {
+  const startTime = getBookingStartTime(booking)
+  const endTime = getBookingEndTime(booking)
+  const roomName = getRoomName(getBookingRoomId(booking))
+  const contactName = getBookingContactName(booking)
+
+  const details = {
+    id: booking.id,
+    title: booking.title,
+    room: roomName,
+    date: getBookingDate(booking),
+    time: `${startTime} - ${endTime}`,
+    contact: contactName,
+    description: booking.description || '',
+    isRecurring: booking.is_recurring || false,
+    recurrenceType: booking.recurrence_type || '',
+    durationHours: booking.duration_hours || 1
+  }
+
+  // Create enhanced modal/popup instead of simple alert
+  if (process.client) {
+    createBookingDetailsModal(booking, details)
+  }
+}
+
+function createBookingDetailsModal(booking, details) {
+  // Remove existing modal if any
+  const existingModal = document.getElementById('booking-details-modal')
+  if (existingModal) {
+    existingModal.remove()
+  }
+
+  // Create modal HTML
+  const modalHTML = `
+    <div id="booking-details-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div class="bg-white rounded-lg shadow-xl w-full max-w-md mx-4">
+        <div class="p-4 border-b flex justify-between items-center">
+          <h2 class="text-xl font-semibold">Buchungsdetails</h2>
+          <button onclick="closeBookingModal()" class="text-gray-500 hover:text-gray-700 text-2xl">&times;</button>
+        </div>
+
+        <div class="p-6">
+          <div class="space-y-4">
+            <div>
+              <h3 class="font-medium text-lg text-gray-900">${details.title}</h3>
+              ${details.description ? `<p class="text-gray-600 mt-1">${details.description}</p>` : ''}
+            </div>
+
+            <div class="grid grid-cols-1 gap-3 text-sm">
+              <div class="flex items-center">
+                <i class="fas fa-door-open mr-2 text-blue-500 w-4"></i>
+                <span class="font-medium mr-2">Raum:</span>
+                <span>${details.room}</span>
+              </div>
+
+              <div class="flex items-center">
+                <i class="fas fa-calendar mr-2 text-blue-500 w-4"></i>
+                <span class="font-medium mr-2">Datum:</span>
+                <span>${formatDisplayDate(details.date)}</span>
+              </div>
+
+              <div class="flex items-center">
+                <i class="fas fa-clock mr-2 text-blue-500 w-4"></i>
+                <span class="font-medium mr-2">Zeit:</span>
+                <span>${details.time}</span>
+              </div>
+
+              <div class="flex items-center">
+                <i class="fas fa-user mr-2 text-blue-500 w-4"></i>
+                <span class="font-medium mr-2">Kontakt:</span>
+                <span>${details.contact}</span>
+              </div>
+
+              ${details.durationHours > 1 ? `
+                <div class="flex items-center">
+                  <i class="fas fa-hourglass-half mr-2 text-blue-500 w-4"></i>
+                  <span class="font-medium mr-2">Dauer:</span>
+                  <span>${details.durationHours}h</span>
+                </div>
+              ` : ''}
+
+              ${details.isRecurring ? `
+                <div class="flex items-center">
+                  <i class="fas fa-repeat mr-2 text-purple-500 w-4"></i>
+                  <span class="font-medium mr-2">Wiederkehrend:</span>
+                  <span>${getRecurrenceDisplayText(details.recurrenceType)}</span>
+                </div>
+              ` : ''}
+            </div>
+          </div>
+
+          ${userStore.isAdmin || isUserBooking(booking) ? `
+            <div class="mt-6 pt-4 border-t">
+              <div class="flex gap-3">
+                <button onclick="editBookingFromModal('${booking.id}')"
+                        class="flex-1 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors">
+                  <i class="fas fa-edit mr-2"></i>
+                  Bearbeiten
+                </button>
+
+                <button onclick="deleteBookingFromModal('${booking.id}', ${details.isRecurring})"
+                        class="flex-1 px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 transition-colors">
+                  <i class="fas fa-trash mr-2"></i>
+                  Löschen
+                </button>
+              </div>
+            </div>
+          ` : ''}
+        </div>
+      </div>
+    </div>
+  `
+
+  // Add to body
+  document.body.insertAdjacentHTML('beforeend', modalHTML)
+
+  // Add global functions for modal actions
+  window.closeBookingModal = () => {
+    const modal = document.getElementById('booking-details-modal')
+    if (modal) modal.remove()
+  }
+
+  window.editBookingFromModal = (bookingId) => {
+    window.closeBookingModal()
+    const bookingToEdit = visibleBookings.value.find(b => b.id == bookingId)
+    if (bookingToEdit) {
+      window.dispatchEvent(new CustomEvent('openBookingModal', {
+        detail: { booking: bookingToEdit }
+      }))
+    }
+  }
+
+  window.deleteBookingFromModal = async (bookingId, isRecurring) => {
+    window.closeBookingModal()
+
+    const bookingToDelete = visibleBookings.value.find(b => b.id == bookingId)
+    if (!bookingToDelete) return
+
+    let message = `Möchten Sie die Buchung "${bookingToDelete.title}" wirklich löschen?`
+
+    if (isRecurring) {
+      message += '\n\nDiese Buchung ist wiederkehrend. Sollen alle Termine der Serie gelöscht werden?'
+
+      const deleteAll = confirm(message + '\n\nOK = Alle löschen, Abbrechen = Nur diesen Termin')
+      if (deleteAll === null) return // User cancelled
+
+      try {
+        await bookingStore.deleteBooking(bookingId, deleteAll)
+
+        if (process.client && window.$toast) {
+          window.$toast.success(
+              deleteAll ? 'Buchungsserie gelöscht!' : 'Buchung gelöscht!',
+              { title: 'Gelöscht', duration: 3000 }
+          )
+        }
+      } catch (error) {
+        if (process.client && window.$toast) {
+          window.$toast.error(`Fehler beim Löschen: ${error.message}`, {
+            title: 'Fehler',
+            duration: 5000
+          })
+        }
+      }
+    } else {
+      if (confirm(message)) {
+        try {
+          await bookingStore.deleteBooking(bookingId, false)
+
+          if (process.client && window.$toast) {
+            window.$toast.success('Buchung gelöscht!', {
+              title: 'Gelöscht',
+              duration: 3000
+            })
+          }
+        } catch (error) {
+          if (process.client && window.$toast) {
+            window.$toast.error(`Fehler beim Löschen: ${error.message}`, {
+              title: 'Fehler',
+              duration: 5000
+            })
+          }
+        }
+      }
+    }
+  }
+
+  // Close on background click
+  document.getElementById('booking-details-modal').addEventListener('click', (e) => {
+    if (e.target.id === 'booking-details-modal') {
+      window.closeBookingModal()
+    }
+  })
+
+  // Close on escape key
+  const escapeHandler = (e) => {
+    if (e.key === 'Escape') {
+      window.closeBookingModal()
+      document.removeEventListener('keydown', escapeHandler)
+    }
+  }
+  document.addEventListener('keydown', escapeHandler)
+}
+
+function isUserBooking(booking) {
+  if (!userStore.user) return false
+
+  const contactName = booking.contact_name || booking.contactName
+  return contactName === userStore.user.username ||
+      booking.user_id === userStore.user.id
+}
+
+function getRecurrenceDisplayText(type) {
+  switch (type) {
+    case 'daily': return 'Täglich'
+    case 'weekly': return 'Wöchentlich'
+    case 'monthly': return 'Monatlich'
+    default: return 'Unbekannt'
+  }
+}
+
+// Enhanced booking item display for calendar grid
+function getBookingDimensionClass(booking, slot) {
+  const startTime = getBookingStartTime(booking)
+  const durationSlots = getBookingDurationSlots(booking)
+  const isFirstSlot = slot === startTime
+
+  // Enhanced styling based on booking type and user permissions
+  let baseClasses = 'absolute rounded p-1 overflow-hidden text-white text-xs cursor-pointer transition-all hover:shadow-lg z-10'
+
+  if (userStore.isAdmin || isUserBooking(booking)) {
+    baseClasses += ' admin-booking'
+  }
+
+  if (booking.is_recurring) {
+    baseClasses += ' recurring-booking'
+  }
+
+  if (isFirstSlot && durationSlots > 1) {
+    const height = Math.min(durationSlots * 64, 256) // Max 4 slots high
+    return `${baseClasses} min-h-16`
+  }
+
+  return `${baseClasses} h-16 min-h-16`
+}
+
+// Add these styles to your Calendar.vue component
+const calendarStyles = `
+<style scoped>
+.admin-booking {
+  border-left: 3px solid rgba(255, 255, 255, 0.8);
+  position: relative;
+}
+
+.admin-booking::after {
+  content: '⚙️';
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  font-size: 8px;
+  opacity: 0.7;
+}
+
+.recurring-booking::before {
+  content: '🔄';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  font-size: 8px;
+  opacity: 0.7;
+}
+
+.booking-item:hover .admin-controls {
+  opacity: 1;
+}
+
+.admin-controls {
+  opacity: 0;
+  transition: opacity 0.2s ease-in-out;
+}
+
+/* Enhanced booking tooltips */
+.booking-tooltip {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.9);
+  color: white;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  white-space: nowrap;
+  z-index: 1000;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease-in-out;
+}
+
+.booking-item:hover .booking-tooltip {
+  opacity: 1;
+}
+
+/* Mobile responsiveness for booking modals */
+@media (max-width: 640px) {
+  #booking-details-modal .bg-white {
+    margin: 1rem;
+    max-height: 90vh;
+    overflow-y: auto;
+  }
+}
+
+/* Loading states */
+.booking-loading {
+  position: relative;
+  overflow: hidden;
+}
+
+.booking-loading::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.4), transparent);
+  animation: loading-shimmer 2s infinite;
+}
+
+@keyframes loading-shimmer {
+  0% {
+    left: -100%;
+  }
+  100% {
+    left: 100%;
+  }
+}
+
+/* Enhanced calendar grid animations */
+.calendar-cell {
+  transition: all 0.2s ease-in-out;
+}
+
+.calendar-cell:hover {
+  background-color: rgba(59, 130, 246, 0.1);
+  transform: scale(1.02);
+}
+
+/* Conflict indicators */
+.booking-conflict {
+  border: 2px solid #ef4444;
+  animation: conflict-pulse 2s infinite;
+}
+
+@keyframes conflict-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgba(239, 68, 68, 0);
+  }
+}
+
+/* Success states */
+.booking-success {
+  border: 2px solid #10b981;
+  animation: success-glow 1s ease-out;
+}
+
+@keyframes success-glow {
+  0% {
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
+  }
+  100% {
+    box-shadow: 0 0 0 10px rgba(16, 185, 129, 0);
+  }
+}
+</style>
+`
+
+// Export enhanced methods for use in Calendar.vue
+export const calendarEnhancements = {
+  showBookingDetails,
+  createBookingDetailsModal,
+  isUserBooking,
+  getRecurrenceDisplayText,
+  getBookingDimensionClass,
+  calendarStyles
+}
+</script>
