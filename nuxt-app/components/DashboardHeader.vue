@@ -11,7 +11,7 @@
             alt="Logo"
             class="h-10 mr-3"
           />
-          <h1 class="text-xl font-semibold">Raumbelegungssystem</h1>
+          <h1 class="text-xl font-semibold">Vest e.V.</h1>
         </div>
 
         <!-- Navigation Links (Desktop) -->

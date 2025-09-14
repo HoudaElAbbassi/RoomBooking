@@ -4,7 +4,7 @@
     <div class="container mx-auto px-4 py-4 flex justify-between items-center">
       <div class="flex items-center">
         <i class="fas fa-calendar-check text-blue-500 text-2xl mr-3"></i>
-        <h1 class="text-xl font-semibold">Raumbelegungssystem</h1>
+        <h1 class="text-xl font-semibold">Vest e.V.</h1>
       </div>
 
       <!-- Navigation -->
